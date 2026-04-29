@@ -3,6 +3,21 @@ import {PrismaService} from '../prisma/prisma.service';
 import {CreatePostDto} from './dto/create-post.dto';
 import {UpdatePostDto} from './dto/update-post.dto';
 
+const HAS_EXPLICIT_TIMEZONE = /(Z|[+-]\d{2}:\d{2})$/;
+
+const parseScheduledAt = (scheduledAt?: string) => {
+  if (!scheduledAt) {
+    return null;
+  }
+
+  // Keep explicit UTC/offset values untouched, otherwise treat as Bangladesh local time.
+  const normalizedInput = HAS_EXPLICIT_TIMEZONE.test(scheduledAt)
+    ? scheduledAt
+    : `${scheduledAt}+06:00`;
+
+  return new Date(normalizedInput);
+};
+
 @Injectable()
 export class PostsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -17,7 +32,7 @@ export class PostsService {
         mediaType: input.mediaType,
         platforms: input.platforms || [],
         status: input.status || 'draft',
-        scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
+        scheduledAt: parseScheduledAt(input.scheduledAt),
       },
     });
   }
@@ -43,7 +58,10 @@ export class PostsService {
         mediaType: input.mediaType,
         platforms: input.platforms,
         status: input.status,
-        scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
+        scheduledAt:
+          input.scheduledAt !== undefined
+            ? parseScheduledAt(input.scheduledAt)
+            : undefined,
       },
     });
   }

@@ -200,23 +200,36 @@ export class SocialAuthService {
         }).toString();
       const pagesPayload = await this.fetchJson(pagesUrl);
       const pages = Array.isArray(pagesPayload.data) ? pagesPayload.data : [];
-      const firstPage = pages[0] as {id?: string; name?: string; access_token?: string} | undefined;
+      const preferredHandle =
+        String(user?.facebookName || '').trim() || this.extractHandle(user?.facebookUrl) || '';
+      const matchedPage = pages.find(page => {
+        const pageName = String((page as {name?: string})?.name || '').trim();
+        return (
+          Boolean(preferredHandle) &&
+          pageName.toLowerCase() === String(preferredHandle).toLowerCase()
+        );
+      }) as {id?: string; name?: string; access_token?: string} | undefined;
+
+      const selectedPage =
+        matchedPage ||
+        (pages[0] as {id?: string; name?: string; access_token?: string} | undefined);
+
       const facebookName =
-        String(firstPage?.name || '').trim() ||
+        String(selectedPage?.name || '').trim() ||
         user?.facebookName ||
         this.extractHandle(user?.facebookUrl);
 
       // 3) Try reading linked Instagram business account username from the page
       let instagramName =
         user?.instagramName || this.extractHandle(user?.instagramUrl);
-      if (firstPage?.id && firstPage?.access_token) {
+      if (selectedPage?.id && selectedPage?.access_token) {
         const igUrl =
           `https://graph.facebook.com/${FB_GRAPH_VERSION}/${encodeURIComponent(
-            String(firstPage.id),
+            String(selectedPage.id),
           )}?` +
           new URLSearchParams({
             fields: 'instagram_business_account{username}',
-            access_token: String(firstPage.access_token),
+            access_token: String(selectedPage.access_token),
           }).toString();
         try {
           const igPayload = await this.fetchJson(igUrl);
@@ -238,6 +251,12 @@ export class SocialAuthService {
           instagramVerified: Boolean(instagramName) || user?.instagramVerified || false,
           facebookName,
           instagramName,
+          facebookUserAccessToken: userAccessToken,
+          facebookPageId: selectedPage?.id ? String(selectedPage.id) : null,
+          facebookPageName: selectedPage?.name ? String(selectedPage.name) : null,
+          facebookPageAccessToken: selectedPage?.access_token
+            ? String(selectedPage.access_token)
+            : null,
         },
       });
     }

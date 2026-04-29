@@ -21,6 +21,10 @@ model User {
   facebookVerified Boolean @default(false)
   instagramVerified Boolean @default(false)
   youtubeVerified Boolean @default(false)
+  facebookUserAccessToken String?
+  facebookPageId String?
+  facebookPageName String?
+  facebookPageAccessToken String?
   passwordHash String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

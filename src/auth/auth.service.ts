@@ -55,6 +55,8 @@ export class AuthService {
     facebookVerified: boolean;
     instagramVerified: boolean;
     youtubeVerified: boolean;
+    facebookPageId: string | null;
+    facebookPageName: string | null;
     createdAt: Date;
   }) {
     return {
@@ -71,6 +73,8 @@ export class AuthService {
       facebookVerified: user.facebookVerified,
       instagramVerified: user.instagramVerified,
       youtubeVerified: user.youtubeVerified,
+      facebookPageId: user.facebookPageId,
+      facebookPageName: user.facebookPageName,
       createdAt: user.createdAt,
     };
   }
