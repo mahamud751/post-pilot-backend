@@ -39,6 +39,19 @@ export class SocialAuthService {
     return parts[parts.length - 1] || null;
   }
 
+  private async fetchJson(url: string, init?: RequestInit) {
+    const response = await fetch(url, init);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message =
+        (payload as {error?: {message?: string}})?.error?.message ||
+        (payload as {message?: string})?.message ||
+        `Request failed (${response.status})`;
+      throw new BadRequestException(message);
+    }
+    return payload as Record<string, unknown>;
+  }
+
   private getFacebookLoginScopes() {
     const full = this.config.get<string>('FACEBOOK_LOGIN_SCOPES')?.trim();
     if (full) {
@@ -154,13 +167,74 @@ export class SocialAuthService {
     }
     if (parsed.userId) {
       const user = await this.prisma.user.findUnique({where: {id: parsed.userId}});
+      const appId = this.config.get<string>('FACEBOOK_APP_ID');
+      const appSecret = this.config.get<string>('FACEBOOK_APP_SECRET');
+      if (!appId || !appSecret) {
+        throw new BadRequestException('FACEBOOK_APP_ID / FACEBOOK_APP_SECRET not configured');
+      }
+      const redirectUri = `${this.getAppUrl()}/social-auth/facebook/callback`;
+
+      // 1) Exchange code -> user access token
+      const tokenUrl =
+        `https://graph.facebook.com/${FB_GRAPH_VERSION}/oauth/access_token?` +
+        new URLSearchParams({
+          client_id: appId,
+          client_secret: appSecret,
+          redirect_uri: redirectUri,
+          code,
+        }).toString();
+      const tokenPayload = await this.fetchJson(tokenUrl);
+      const userAccessToken = String(tokenPayload.access_token || '');
+      if (!userAccessToken) {
+        throw new BadRequestException('Could not retrieve Facebook access token');
+      }
+
+      // 2) Read user's pages to get real page name
+      const pagesUrl =
+        `https://graph.facebook.com/${FB_GRAPH_VERSION}/me/accounts?` +
+        new URLSearchParams({
+          access_token: userAccessToken,
+        }).toString();
+      const pagesPayload = await this.fetchJson(pagesUrl);
+      const pages = Array.isArray(pagesPayload.data) ? pagesPayload.data : [];
+      const firstPage = pages[0] as {id?: string; name?: string; access_token?: string} | undefined;
+      const facebookName =
+        String(firstPage?.name || '').trim() ||
+        user?.facebookName ||
+        this.extractHandle(user?.facebookUrl);
+
+      // 3) Try reading linked Instagram business account username from the page
+      let instagramName =
+        user?.instagramName || this.extractHandle(user?.instagramUrl);
+      if (firstPage?.id && firstPage?.access_token) {
+        const igUrl =
+          `https://graph.facebook.com/${FB_GRAPH_VERSION}/${encodeURIComponent(
+            String(firstPage.id),
+          )}?` +
+          new URLSearchParams({
+            fields: 'instagram_business_account{username}',
+            access_token: String(firstPage.access_token),
+          }).toString();
+        try {
+          const igPayload = await this.fetchJson(igUrl);
+          const instagramBusinessAccount = igPayload.instagram_business_account as
+            | {username?: string}
+            | undefined;
+          if (instagramBusinessAccount?.username) {
+            instagramName = String(instagramBusinessAccount.username);
+          }
+        } catch {
+          // keep fallback handle
+        }
+      }
+
       await this.prisma.user.update({
         where: {id: parsed.userId},
         data: {
           facebookVerified: true,
-          instagramVerified: user?.instagramVerified || false,
-          facebookName: user?.facebookName || this.extractHandle(user?.facebookUrl),
-          instagramName: user?.instagramName || this.extractHandle(user?.instagramUrl),
+          instagramVerified: Boolean(instagramName) || user?.instagramVerified || false,
+          facebookName,
+          instagramName,
         },
       });
     }
