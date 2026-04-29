@@ -5,8 +5,6 @@ import {PrismaService} from '../prisma/prisma.service';
 const FB_GRAPH_VERSION = 'v21.0';
 const FB_LOGIN_SCOPES_CORE =
   'public_profile,business_management,pages_show_list,pages_read_engagement,pages_manage_posts';
-const FB_LOGIN_SCOPES_INSTAGRAM_DEFAULT =
-  'instagram_basic,instagram_content_publish';
 const TIKTOK_OAUTH_SCOPES = 'user.info.basic,user.info.profile,video.publish';
 const YOUTUBE_OAUTH_SCOPES =
   'https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.upload';
@@ -64,7 +62,12 @@ export class SocialAuthService {
       return FB_LOGIN_SCOPES_CORE;
     }
     const instagramScopes = this.config.get<string>('FACEBOOK_INSTAGRAM_LOGIN_SCOPES')?.trim();
-    return `${FB_LOGIN_SCOPES_CORE},${instagramScopes || FB_LOGIN_SCOPES_INSTAGRAM_DEFAULT}`;
+    // Do not inject default Instagram scopes because Meta rejects legacy
+    // instagram_basic/instagram_content_publish in many apps.
+    if (!instagramScopes) {
+      return FB_LOGIN_SCOPES_CORE;
+    }
+    return `${FB_LOGIN_SCOPES_CORE},${instagramScopes}`;
   }
 
   getVerifyConfig() {
