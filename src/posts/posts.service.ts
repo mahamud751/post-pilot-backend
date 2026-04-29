@@ -13,6 +13,7 @@ export class PostsService {
         userId,
         caption: input.caption,
         mediaUrl: input.mediaUrl,
+        thumbnailUrl: input.thumbnailUrl,
         mediaType: input.mediaType,
         platforms: input.platforms || [],
         status: input.status || 'draft',
@@ -38,6 +39,7 @@ export class PostsService {
       data: {
         caption: input.caption,
         mediaUrl: input.mediaUrl,
+        thumbnailUrl: input.thumbnailUrl,
         mediaType: input.mediaType,
         platforms: input.platforms,
         status: input.status,

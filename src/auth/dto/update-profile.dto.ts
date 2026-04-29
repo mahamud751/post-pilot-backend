@@ -12,5 +12,38 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsUrl({require_tld: false})
   avatarUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl({require_tld: false})
+  facebookUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl({require_tld: false})
+  instagramUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUrl({require_tld: false})
+  youtubeUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  facebookName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  instagramName?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  youtubeName?: string;
 }
 

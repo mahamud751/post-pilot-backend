@@ -12,6 +12,15 @@ model User {
   name         String
   email        String   @unique
   avatarUrl    String?
+  facebookUrl  String?
+  instagramUrl String?
+  youtubeUrl   String?
+  facebookName String?
+  instagramName String?
+  youtubeName  String?
+  facebookVerified Boolean @default(false)
+  instagramVerified Boolean @default(false)
+  youtubeVerified Boolean @default(false)
   passwordHash String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -37,6 +46,7 @@ model Post {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   caption     String
   mediaUrl    String?
+  thumbnailUrl String?
   mediaType   String?
   platforms   String[]
   status      String   @default("draft")

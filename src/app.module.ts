@@ -10,6 +10,7 @@ import {MediaModule} from './media/media.module';
 import {PostsModule} from './posts/posts.module';
 import {PrismaModule} from './prisma/prisma.module';
 import {ScheduleModule} from './schedule/schedule.module';
+import {SocialAuthModule} from './social-auth/social-auth.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import {ScheduleModule} from './schedule/schedule.module';
     MediaModule,
     PostsModule,
     ScheduleModule,
+    SocialAuthModule,
     AnalyticsModule,
     AiModule,
   ],

@@ -14,6 +14,11 @@ export class CreatePostDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  thumbnailUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   mediaType?: string;
 
   @ApiPropertyOptional({type: [String]})

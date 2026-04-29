@@ -41,6 +41,40 @@ export class AuthService {
     throw new InternalServerErrorException('Auth service failed. Please try again.');
   }
 
+  private serializeUser(user: {
+    id: string;
+    name: string;
+    email: string;
+    avatarUrl: string | null;
+    facebookUrl: string | null;
+    instagramUrl: string | null;
+    youtubeUrl: string | null;
+    facebookName: string | null;
+    instagramName: string | null;
+    youtubeName: string | null;
+    facebookVerified: boolean;
+    instagramVerified: boolean;
+    youtubeVerified: boolean;
+    createdAt: Date;
+  }) {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      facebookUrl: user.facebookUrl,
+      instagramUrl: user.instagramUrl,
+      youtubeUrl: user.youtubeUrl,
+      facebookName: user.facebookName,
+      instagramName: user.instagramName,
+      youtubeName: user.youtubeName,
+      facebookVerified: user.facebookVerified,
+      instagramVerified: user.instagramVerified,
+      youtubeVerified: user.youtubeVerified,
+      createdAt: user.createdAt,
+    };
+  }
+
   async register(input: RegisterDto) {
     try {
       const exists = await this.prisma.user.findUnique({
@@ -62,13 +96,7 @@ export class AuthService {
       const token = this.jwtService.sign({userId: user.id});
       return {
         token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-          createdAt: user.createdAt,
-        },
+        user: this.serializeUser(user),
       };
     } catch (error) {
       this.normalizePrismaError(error);
@@ -91,13 +119,7 @@ export class AuthService {
       const token = this.jwtService.sign({userId: user.id});
       return {
         token,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-          createdAt: user.createdAt,
-        },
+        user: this.serializeUser(user),
       };
     } catch (error) {
       this.normalizePrismaError(error);
@@ -110,34 +132,50 @@ export class AuthService {
       throw new UnauthorizedException('User not found');
     }
     return {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatarUrl: user.avatarUrl,
-        createdAt: user.createdAt,
-      },
+      user: this.serializeUser(user),
     };
   }
 
   async updateMe(userId: string, input: UpdateProfileDto) {
     try {
+      const existing = await this.prisma.user.findUnique({where: {id: userId}});
+      if (!existing) {
+        throw new UnauthorizedException('User not found');
+      }
       const user = await this.prisma.user.update({
         where: {id: userId},
         data: {
           ...(typeof input.name === 'string' ? {name: input.name.trim()} : {}),
           ...(typeof input.avatarUrl === 'string' ? {avatarUrl: input.avatarUrl} : {}),
+          ...(typeof input.facebookUrl === 'string'
+            ? {
+                facebookUrl: input.facebookUrl,
+                facebookVerified: input.facebookUrl !== existing.facebookUrl ? false : undefined,
+              }
+            : {}),
+          ...(typeof input.instagramUrl === 'string'
+            ? {
+                instagramUrl: input.instagramUrl,
+                instagramVerified:
+                  input.instagramUrl !== existing.instagramUrl ? false : undefined,
+              }
+            : {}),
+          ...(typeof input.youtubeUrl === 'string'
+            ? {
+                youtubeUrl: input.youtubeUrl,
+                youtubeVerified: input.youtubeUrl !== existing.youtubeUrl ? false : undefined,
+              }
+            : {}),
+          ...(typeof input.facebookName === 'string' ? {facebookName: input.facebookName} : {}),
+          ...(typeof input.instagramName === 'string'
+            ? {instagramName: input.instagramName}
+            : {}),
+          ...(typeof input.youtubeName === 'string' ? {youtubeName: input.youtubeName} : {}),
         },
       });
 
       return {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-          createdAt: user.createdAt,
-        },
+        user: this.serializeUser(user),
       };
     } catch (error) {
       this.normalizePrismaError(error);
