@@ -19,7 +19,7 @@ export class SocialAuthService {
   ) {}
 
   private getAppUrl() {
-    return this.config.get<string>('APP_URL') || 'http://localhost:3000/v1';
+    return this.config.get<string>('APP_URL') || 'https://postapi.chapaimango.online/v1';
   }
 
   private parseState(state: string) {
@@ -158,7 +158,7 @@ export class SocialAuthService {
         where: {id: parsed.userId},
         data: {
           facebookVerified: true,
-          instagramVerified: true,
+          instagramVerified: user?.instagramVerified || false,
           facebookName: user?.facebookName || this.extractHandle(user?.facebookUrl),
           instagramName: user?.instagramName || this.extractHandle(user?.instagramUrl),
         },
