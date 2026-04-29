@@ -30,6 +30,15 @@ export class SocialAuthService {
     }
   }
 
+  private extractHandle(url?: string | null) {
+    const clean = String(url || '').trim().replace(/\/+$/, '');
+    if (!clean) {
+      return null;
+    }
+    const parts = clean.split('/');
+    return parts[parts.length - 1] || null;
+  }
+
   private getFacebookLoginScopes() {
     const full = this.config.get<string>('FACEBOOK_LOGIN_SCOPES')?.trim();
     if (full) {
@@ -144,9 +153,15 @@ export class SocialAuthService {
       };
     }
     if (parsed.userId) {
+      const user = await this.prisma.user.findUnique({where: {id: parsed.userId}});
       await this.prisma.user.update({
         where: {id: parsed.userId},
-        data: {facebookVerified: true, instagramVerified: true},
+        data: {
+          facebookVerified: true,
+          instagramVerified: true,
+          facebookName: user?.facebookName || this.extractHandle(user?.facebookUrl),
+          instagramName: user?.instagramName || this.extractHandle(user?.instagramUrl),
+        },
       });
     }
     return {
@@ -167,9 +182,13 @@ export class SocialAuthService {
       };
     }
     if (parsed.userId) {
+      const user = await this.prisma.user.findUnique({where: {id: parsed.userId}});
       await this.prisma.user.update({
         where: {id: parsed.userId},
-        data: {instagramVerified: true},
+        data: {
+          instagramVerified: true,
+          instagramName: user?.instagramName || this.extractHandle(user?.instagramUrl),
+        },
       });
     }
     return {
@@ -202,9 +221,13 @@ export class SocialAuthService {
       };
     }
     if (parsed.userId) {
+      const user = await this.prisma.user.findUnique({where: {id: parsed.userId}});
       await this.prisma.user.update({
         where: {id: parsed.userId},
-        data: {youtubeVerified: true},
+        data: {
+          youtubeVerified: true,
+          youtubeName: user?.youtubeName || this.extractHandle(user?.youtubeUrl),
+        },
       });
     }
     return {
