@@ -1,0 +1,13 @@
+{
+  "users": [
+    {
+      "id": "d14a9dbd-449a-4978-a341-3b68216cb9d0",
+      "name": "Alex",
+      "email": "alex@test.com",
+      "passwordHash": "$2b$10$b//GRba16D2O.CosQaBmUu4WfrPlI.NbrgpAIsMC5JbPeZSNGZ7NG",
+      "createdAt": "2026-04-28T20:30:25.095Z"
+    }
+  ],
+  "posts": [],
+  "media": []
+}
