@@ -66,9 +66,14 @@ model Post {
   thumbnailUrl String?
   mediaType   String?
   platforms   String[]
-  status      String   @default("draft")
-  scheduledAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status          String   @default("draft")
+  scheduledAt     DateTime?
+  facebookPostId  String?
+  reach           Int      @default(0)
+  impressions     Int      @default(0)
+  engagements     Int      @default(0)
+  clicks          Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 

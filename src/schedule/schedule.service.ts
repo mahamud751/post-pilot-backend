@@ -118,11 +118,16 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      const facebookPostId = String(
+        (payload as {id?: string})?.id || '',
+      ).trim();
+
       await this.prisma.post.update({
         where: {id: post.id},
         data: {
           status: 'published',
           scheduledAt: null,
+          ...(facebookPostId ? {facebookPostId} : {}),
         },
       });
       await this.notificationsService.create(post.userId, {
