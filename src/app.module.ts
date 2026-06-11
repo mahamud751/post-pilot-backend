@@ -5,6 +5,8 @@ import {join} from 'path';
 import {AppController} from './app.controller';
 import {AiModule} from './ai/ai.module';
 import {AnalyticsModule} from './analytics/analytics.module';
+import {DashboardModule} from './dashboard/dashboard.module';
+import {NotificationsModule} from './notifications/notifications.module';
 import {AuthModule} from './auth/auth.module';
 import {MediaModule} from './media/media.module';
 import {PostsModule} from './posts/posts.module';
@@ -26,6 +28,8 @@ import {SocialAuthModule} from './social-auth/social-auth.module';
     ScheduleModule,
     SocialAuthModule,
     AnalyticsModule,
+    DashboardModule,
+    NotificationsModule,
     AiModule,
   ],
   controllers: [AppController],

@@ -1,4 +1,5 @@
 import {Injectable, NotFoundException} from '@nestjs/common';
+import {NotificationsService} from '../notifications/notifications.service';
 import {PrismaService} from '../prisma/prisma.service';
 import {CreatePostDto} from './dto/create-post.dto';
 import {UpdatePostDto} from './dto/update-post.dto';
@@ -20,10 +21,13 @@ const parseScheduledAt = (scheduledAt?: string) => {
 
 @Injectable()
 export class PostsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
-  create(userId: string, input: CreatePostDto) {
-    return this.prisma.post.create({
+  async create(userId: string, input: CreatePostDto) {
+    const post = await this.prisma.post.create({
       data: {
         userId,
         caption: input.caption,
@@ -35,6 +39,24 @@ export class PostsService {
         scheduledAt: parseScheduledAt(input.scheduledAt),
       },
     });
+
+    if (post.status === 'scheduled' && post.scheduledAt) {
+      await this.notificationsService.create(userId, {
+        type: 'post_scheduled',
+        title: 'Post scheduled',
+        body: `Your post is scheduled for ${post.scheduledAt.toLocaleString()}.`,
+        meta: {postId: post.id},
+      });
+    } else if (post.status === 'published') {
+      await this.notificationsService.create(userId, {
+        type: 'post_published',
+        title: 'Post published',
+        body: 'Your post was published successfully.',
+        meta: {postId: post.id},
+      });
+    }
+
+    return post;
   }
 
   findAll(userId: string, status?: string) {

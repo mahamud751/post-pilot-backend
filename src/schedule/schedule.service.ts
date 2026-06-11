@@ -1,4 +1,5 @@
 import {Injectable, Logger, OnModuleDestroy, OnModuleInit} from '@nestjs/common';
+import {NotificationsService} from '../notifications/notifications.service';
 import {PrismaService} from '../prisma/prisma.service';
 
 @Injectable()
@@ -6,7 +7,10 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ScheduleService.name);
   private timer: NodeJS.Timeout | null = null;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   onModuleInit() {
     this.publishDueFacebookPosts().catch(error => {
@@ -62,6 +66,12 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
           where: {id: post.id},
           data: {status: 'failed'},
         });
+        await this.notificationsService.create(post.userId, {
+          type: 'post_failed',
+          title: 'Publish failed',
+          body: 'Facebook page is not connected. Re-verify your account.',
+          meta: {postId: post.id},
+        });
         this.logger.warn(
           `Skipped scheduled Facebook post ${post.id}: missing page id/token for user ${post.userId}`,
         );
@@ -98,6 +108,12 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
           where: {id: post.id},
           data: {status: 'failed'},
         });
+        await this.notificationsService.create(post.userId, {
+          type: 'post_failed',
+          title: 'Publish failed',
+          body: errorMessage,
+          meta: {postId: post.id},
+        });
         this.logger.warn(`Failed publishing post ${post.id}: ${errorMessage}`);
         continue;
       }
@@ -108,6 +124,12 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
           status: 'published',
           scheduledAt: null,
         },
+      });
+      await this.notificationsService.create(post.userId, {
+        type: 'post_published',
+        title: 'Post published',
+        body: 'Your scheduled post was published to Facebook.',
+        meta: {postId: post.id},
       });
     }
   }
