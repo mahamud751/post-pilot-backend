@@ -41,19 +41,27 @@ export class PostsService {
     });
 
     if (post.status === 'scheduled' && post.scheduledAt) {
-      await this.notificationsService.create(userId, {
-        type: 'post_scheduled',
-        title: 'Post scheduled',
-        body: `Your post is scheduled for ${post.scheduledAt.toLocaleString()}.`,
-        meta: {postId: post.id},
-      });
+      try {
+        await this.notificationsService.create(userId, {
+          type: 'post_scheduled',
+          title: 'Post scheduled',
+          body: `Your post is scheduled for ${post.scheduledAt.toLocaleString()}.`,
+          meta: {postId: post.id},
+        });
+      } catch {
+        // notifications table may not be migrated yet
+      }
     } else if (post.status === 'published') {
-      await this.notificationsService.create(userId, {
-        type: 'post_published',
-        title: 'Post published',
-        body: 'Your post was published successfully.',
-        meta: {postId: post.id},
-      });
+      try {
+        await this.notificationsService.create(userId, {
+          type: 'post_published',
+          title: 'Post published',
+          body: 'Your post was published successfully.',
+          meta: {postId: post.id},
+        });
+      } catch {
+        // notifications table may not be migrated yet
+      }
     }
 
     return post;
