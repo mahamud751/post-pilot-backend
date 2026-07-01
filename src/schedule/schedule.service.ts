@@ -1,6 +1,7 @@
 import {Injectable, Logger, OnModuleDestroy, OnModuleInit} from '@nestjs/common';
 import {NotificationsService} from '../notifications/notifications.service';
 import {PrismaService} from '../prisma/prisma.service';
+import {SocialPublishService} from '../social-publish/social-publish.service';
 
 @Injectable()
 export class ScheduleService implements OnModuleInit, OnModuleDestroy {
@@ -10,16 +11,17 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
+    private readonly socialPublish: SocialPublishService,
   ) {}
 
   onModuleInit() {
-    this.publishDueFacebookPosts().catch(error => {
+    this.publishDuePosts().catch(error => {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Initial scheduled publish check failed: ${message}`);
     });
 
     this.timer = setInterval(() => {
-      this.publishDueFacebookPosts().catch(error => {
+      this.publishDuePosts().catch(error => {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Scheduled publish loop failed: ${message}`);
       });
@@ -44,21 +46,43 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async publishDueFacebookPosts() {
+  private async notify(
+    userId: string,
+    input: {type: string; title: string; body: string; meta?: Record<string, unknown>},
+  ) {
+    try {
+      await this.notificationsService.create(userId, input);
+    } catch {
+      // notifications table may not exist yet
+    }
+  }
+
+  private async publishDuePosts() {
     const duePosts = await this.prisma.post.findMany({
       where: {
         status: 'scheduled',
         scheduledAt: {lte: new Date()},
-        platforms: {has: 'facebook'},
       },
-      include: {
-        user: true,
-      },
+      include: {user: true},
       orderBy: {scheduledAt: 'asc'},
       take: 25,
     });
 
     for (const post of duePosts) {
+      const platforms = post.platforms || [];
+      const needsSocial =
+        platforms.includes('facebook') ||
+        platforms.includes('instagram') ||
+        platforms.includes('youtube');
+
+      if (!needsSocial) {
+        await this.prisma.post.update({
+          where: {id: post.id},
+          data: {status: 'published', scheduledAt: null},
+        });
+        continue;
+      }
+
       const pageId = post.user.facebookPageId;
       const pageAccessToken = post.user.facebookPageAccessToken;
       if (!pageId || !pageAccessToken) {
@@ -66,77 +90,75 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
           where: {id: post.id},
           data: {status: 'failed'},
         });
-        await this.notificationsService.create(post.userId, {
+        await this.notify(post.userId, {
           type: 'post_failed',
           title: 'Publish failed',
           body: 'Facebook page is not connected. Re-verify your account.',
           meta: {postId: post.id},
         });
-        this.logger.warn(
-          `Skipped scheduled Facebook post ${post.id}: missing page id/token for user ${post.userId}`,
-        );
         continue;
       }
 
-      const message = [post.caption || '', post.mediaUrl || '']
-        .map(value => value.trim())
-        .filter(Boolean)
-        .join('\n\n');
+      const publishInput = {
+        caption: post.caption || '',
+        mediaUrl: post.mediaUrl,
+        mediaType: post.mediaType,
+      };
 
-      const body = new URLSearchParams({
-        access_token: pageAccessToken,
-      });
-      if (message) {
-        body.set('message', message);
-      }
-
-      const publishResponse = await fetch(
-        `https://graph.facebook.com/v21.0/${encodeURIComponent(pageId)}/feed`,
+      const results = await this.socialPublish.publishToPlatforms(
+        platforms,
         {
-          method: 'POST',
-          headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: body.toString(),
+          facebookPageId: post.user.facebookPageId,
+          facebookPageAccessToken: post.user.facebookPageAccessToken,
+          instagramBusinessAccountId: post.user.instagramBusinessAccountId,
         },
+        publishInput,
       );
-      const payload = await publishResponse.json().catch(() => ({}));
 
-      if (!publishResponse.ok) {
-        const errorMessage =
-          (payload as {error?: {message?: string}})?.error?.message ||
-          `Facebook publish failed (${publishResponse.status})`;
+      const successes = results.filter(r => r.externalPostId && !r.error);
+      const errors = results.filter(r => r.error).map(r => `${r.platform}: ${r.error}`);
+
+      if (successes.length === 0) {
         await this.prisma.post.update({
           where: {id: post.id},
           data: {status: 'failed'},
         });
-        await this.notificationsService.create(post.userId, {
+        await this.notify(post.userId, {
           type: 'post_failed',
           title: 'Publish failed',
-          body: errorMessage,
+          body: errors.join(' | ') || 'All platforms failed to publish.',
           meta: {postId: post.id},
         });
-        this.logger.warn(`Failed publishing post ${post.id}: ${errorMessage}`);
+        this.logger.warn(`Failed publishing post ${post.id}: ${errors.join(' | ')}`);
         continue;
       }
 
-      const facebookPostId = String(
-        (payload as {id?: string})?.id || '',
-      ).trim();
+      const facebookResult = successes.find(r => r.platform === 'facebook');
 
       await this.prisma.post.update({
         where: {id: post.id},
         data: {
           status: 'published',
           scheduledAt: null,
-          ...(facebookPostId ? {facebookPostId} : {}),
+          ...(facebookResult?.externalPostId
+            ? {facebookPostId: facebookResult.externalPostId}
+            : {}),
         },
       });
-      await this.notificationsService.create(post.userId, {
+
+      const publishedNames = successes.map(r => r.platform).join(', ');
+      await this.notify(post.userId, {
         type: 'post_published',
         title: 'Post published',
-        body: 'Your scheduled post was published to Facebook.',
-        meta: {postId: post.id},
+        body: `Published to ${publishedNames}.`,
+        meta: {postId: post.id, platforms: successes},
       });
+
+      if (errors.length > 0) {
+        this.logger.warn(
+          `Post ${post.id} partially published. Errors: ${errors.join(' | ')}`,
+        );
+      }
     }
   }
 }
-

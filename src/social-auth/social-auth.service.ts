@@ -219,25 +219,28 @@ export class SocialAuthService {
         user?.facebookName ||
         this.extractHandle(user?.facebookUrl);
 
-      // 3) Try reading linked Instagram business account username from the page
       let instagramName =
         user?.instagramName || this.extractHandle(user?.instagramUrl);
+      let instagramBusinessAccountId: string | null = null;
       if (selectedPage?.id && selectedPage?.access_token) {
         const igUrl =
           `https://graph.facebook.com/${FB_GRAPH_VERSION}/${encodeURIComponent(
             String(selectedPage.id),
           )}?` +
           new URLSearchParams({
-            fields: 'instagram_business_account{username}',
+            fields: 'instagram_business_account{id,username}',
             access_token: String(selectedPage.access_token),
           }).toString();
         try {
           const igPayload = await this.fetchJson(igUrl);
           const instagramBusinessAccount = igPayload.instagram_business_account as
-            | {username?: string}
+            | {id?: string; username?: string}
             | undefined;
           if (instagramBusinessAccount?.username) {
             instagramName = String(instagramBusinessAccount.username);
+          }
+          if (instagramBusinessAccount?.id) {
+            instagramBusinessAccountId = String(instagramBusinessAccount.id);
           }
         } catch {
           // keep fallback handle
@@ -257,6 +260,9 @@ export class SocialAuthService {
           facebookPageAccessToken: selectedPage?.access_token
             ? String(selectedPage.access_token)
             : null,
+          ...(instagramBusinessAccountId
+            ? {instagramBusinessAccountId}
+            : {}),
         },
       });
     }
