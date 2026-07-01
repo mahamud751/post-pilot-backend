@@ -1,7 +1,10 @@
 import {Injectable, Logger, OnModuleDestroy, OnModuleInit} from '@nestjs/common';
 import {NotificationsService} from '../notifications/notifications.service';
+import {formatScheduledAtBd} from '../posts/schedule-time';
 import {PrismaService} from '../prisma/prisma.service';
 import {SocialPublishService} from '../social-publish/social-publish.service';
+
+const PUBLISH_INTERVAL_MS = 15_000;
 
 @Injectable()
 export class ScheduleService implements OnModuleInit, OnModuleDestroy {
@@ -25,7 +28,7 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Scheduled publish loop failed: ${message}`);
       });
-    }, 60_000);
+    }, PUBLISH_INTERVAL_MS);
   }
 
   onModuleDestroy() {
@@ -69,6 +72,10 @@ export class ScheduleService implements OnModuleInit, OnModuleDestroy {
     });
 
     for (const post of duePosts) {
+      this.logger.log(
+        `Publishing scheduled post ${post.id} (due ${formatScheduledAtBd(post.scheduledAt!)}, now ${formatScheduledAtBd(new Date())})`,
+      );
+
       const platforms = post.platforms || [];
       const needsSocial =
         platforms.includes('facebook') ||

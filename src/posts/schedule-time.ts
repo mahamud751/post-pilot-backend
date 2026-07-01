@@ -1,4 +1,4 @@
-const HAS_EXPLICIT_TIMEZONE = /(Z|[+-]\d{2}:\d{2})$/;
+const HAS_OFFSET_TIMEZONE = /[+-]\d{2}:\d{2}$/;
 const MIN_SCHEDULE_LEAD_MS = 60_000;
 
 export const parseScheduledAt = (scheduledAt?: string | null) => {
@@ -6,9 +6,17 @@ export const parseScheduledAt = (scheduledAt?: string | null) => {
     return null;
   }
 
-  const normalizedInput = HAS_EXPLICIT_TIMEZONE.test(scheduledAt)
-    ? scheduledAt
-    : `${scheduledAt}+06:00`;
+  const trimmed = scheduledAt.trim();
+  let normalizedInput: string;
+
+  if (trimmed.endsWith('Z')) {
+    // Mobile clients (okhttp) often send Bangladesh wall-clock with a literal Z suffix.
+    normalizedInput = `${trimmed.slice(0, -1)}+06:00`;
+  } else if (HAS_OFFSET_TIMEZONE.test(trimmed)) {
+    normalizedInput = trimmed;
+  } else {
+    normalizedInput = `${trimmed}+06:00`;
+  }
 
   const parsed = new Date(normalizedInput);
   if (Number.isNaN(parsed.getTime())) {
@@ -17,6 +25,9 @@ export const parseScheduledAt = (scheduledAt?: string | null) => {
 
   return parsed;
 };
+
+export const formatScheduledAtBd = (date: Date) =>
+  date.toLocaleString('en-BD', {timeZone: 'Asia/Dhaka'});
 
 export const isPublishDue = (scheduledAt: Date, now = new Date()) =>
   scheduledAt.getTime() <= now.getTime();
@@ -33,7 +44,7 @@ export const assertSchedulableTime = (scheduledAt: Date, now = new Date()) => {
   }
 
   if (delta >= -120_000) {
-    // Publish-now window (scheduler picks up within ~60 seconds).
+    // Publish-now window (scheduler picks up within ~15 seconds).
     return;
   }
 
