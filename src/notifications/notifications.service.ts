@@ -15,7 +15,7 @@ export class NotificationsService {
         type: input.type,
         title: input.title,
         body: input.body,
-        meta: input.meta ?? undefined,
+        ...(input.meta && {meta: input.meta as any}),
       },
     });
   }
