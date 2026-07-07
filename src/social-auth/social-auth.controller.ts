@@ -1,5 +1,7 @@
-import {Controller, Get, Query} from '@nestjs/common';
-import {ApiTags} from '@nestjs/swagger';
+import {Controller, Get, Query, UseGuards} from '@nestjs/common';
+import {ApiBearerAuth, ApiTags} from '@nestjs/swagger';
+import {CurrentUserId} from '../common/decorators/current-user.decorator';
+import {JwtAuthGuard} from '../auth/jwt-auth.guard';
 import {SocialAuthService} from './social-auth.service';
 
 @ApiTags('social-auth')
@@ -12,8 +14,10 @@ export class SocialAuthController {
     return this.socialAuthService.getVerifyConfig();
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Get('facebook/connect')
-  facebookConnect(@Query('userId') userId: string) {
+  facebookConnect(@CurrentUserId() userId: string, @Query('userId') _userId?: string) {
     return this.socialAuthService.getFacebookConnectUrl(userId);
   }
 
@@ -22,8 +26,10 @@ export class SocialAuthController {
     return this.socialAuthService.handleFacebookCallback(code, state);
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Get('tiktok/connect')
-  tiktokConnect(@Query('userId') userId: string) {
+  tiktokConnect(@CurrentUserId() userId: string, @Query('userId') _userId?: string) {
     return this.socialAuthService.getTikTokConnectUrl(userId);
   }
 
@@ -32,8 +38,10 @@ export class SocialAuthController {
     return this.socialAuthService.handleTikTokCallback(code, state);
   }
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Get('youtube/connect')
-  youtubeConnect(@Query('userId') userId: string) {
+  youtubeConnect(@CurrentUserId() userId: string, @Query('userId') _userId?: string) {
     return this.socialAuthService.getYouTubeConnectUrl(userId);
   }
 
@@ -47,4 +55,3 @@ export class SocialAuthController {
     return this.socialAuthService.handleYouTubeCallback(code, state, error, errorDescription);
   }
 }
-

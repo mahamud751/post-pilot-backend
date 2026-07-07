@@ -85,10 +85,14 @@ export class PostsService {
     const scheduledAt =
       input.scheduledAt !== undefined ? parseScheduledAt(input.scheduledAt) : undefined;
     const nextStatus = input.status ?? exists.status;
+    const nextScheduledAt = scheduledAt === undefined ? exists.scheduledAt : scheduledAt;
 
-    if (nextStatus === 'scheduled' && scheduledAt) {
+    if (nextStatus === 'scheduled') {
+      if (!nextScheduledAt) {
+        throw new BadRequestException('Scheduled posts require a valid scheduledAt time.');
+      }
       try {
-        assertSchedulableTime(scheduledAt);
+        assertSchedulableTime(nextScheduledAt);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Invalid schedule time.';
         throw new BadRequestException(message);
@@ -118,4 +122,3 @@ export class PostsService {
     return {ok: true};
   }
 }
-

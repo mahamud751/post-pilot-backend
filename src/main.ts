@@ -9,9 +9,23 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT', 4000);
+  const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+  const jwtSecret = configService.get<string>('JWT_SECRET', 'postpilot-dev-secret');
+  const corsOrigins = String(configService.get<string>('CORS_ORIGINS', '') || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+
+  if (nodeEnv === 'production' && jwtSecret === 'postpilot-dev-secret') {
+    throw new Error('JWT_SECRET must be configured in production.');
+  }
 
   app.use(cookieParser());
-  app.enableCors();
+  app.enableCors({
+    origin: corsOrigins.length > 0 ? corsOrigins : true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
   app.setGlobalPrefix('v1');
 
   app.useGlobalPipes(
@@ -46,4 +60,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
