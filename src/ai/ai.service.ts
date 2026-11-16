@@ -104,6 +104,29 @@ const AUTOPILOT_SCHEMA: JsonSchema = {
   required: ['hypothesis', 'items'],
 };
 
+const REPLY_SCHEMA: JsonSchema = {
+  type: 'OBJECT',
+  properties: {
+    replies: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          id: STR,
+          intent: STR,
+          needsHuman: {type: 'BOOLEAN'},
+          reply: STR,
+        },
+        required: ['id', 'intent', 'needsHuman', 'reply'],
+      },
+    },
+  },
+  required: ['replies'],
+};
+
+export type ReplyIntent = 'question' | 'praise' | 'complaint' | 'order' | 'spam' | 'other';
+const INTENTS = new Set<ReplyIntent>(['question', 'praise', 'complaint', 'order', 'spam', 'other']);
+
 const SYSTEM = [
   'You are PostPilot, a social media copywriter for small businesses.',
   'Use ONLY the facts in the BRAND FACTS block. Never invent prices, discounts, promotions, deadlines,',
@@ -486,6 +509,70 @@ export class AiService {
       data: {output: {hypothesis, items: kept} as Prisma.InputJsonValue},
     });
     return {generationId, hypothesis, items: kept, credits: await this.usage(ctx.id)};
+  }
+
+  /**
+   * Drafts replies for a batch of comments and DMs in one metered call. The model flags anything a
+   * person should answer (complaints, refunds, personal data, threats, legal or medical questions).
+   */
+  async generateReplies(
+    ctx: WorkspaceContext,
+    userId: string,
+    input: {
+      instructions: string | null;
+      items: {id: string; kind: 'COMMENT' | 'DM'; platform: SocialPlatform; authorName: string | null; text: string}[];
+    },
+  ) {
+    const brand = await this.brand.get(ctx.id);
+    const prompt = [
+      `BRAND FACTS:\n${this.brandBlock(brand)}`,
+      'You answer comments and direct messages on behalf of this brand.',
+      'Reply in the same language and script the person used. Be warm, short and specific: at most 2 sentences for a comment, 4 for a DM.',
+      'Only state facts from BRAND FACTS. If the answer is not there, say the team will follow up, or point to a call to action listed there.',
+      'Never ask for or repeat passwords, card numbers, OTPs or other personal data. Never argue.',
+      'For each item return: id (unchanged), intent (question | praise | complaint | order | spam | other),',
+      'needsHuman (true for complaints, refunds, angry or abusive messages, legal/medical/safety topics, or anything you cannot answer from the facts),',
+      'and reply (empty string when intent is spam).',
+      'Public comments must not include prices or order details meant for one person; invite them to DM instead.',
+      input.instructions ? `OWNER INSTRUCTIONS FOR REPLIES:\n${input.instructions}` : '',
+      `ITEMS:\n${JSON.stringify(
+        input.items.map(item => ({
+          id: item.id,
+          type: item.kind === 'DM' ? 'direct message' : 'public comment',
+          platform: item.platform,
+          from: item.authorName || 'someone',
+          text: item.text.slice(0, 1500),
+        })),
+        null,
+        1,
+      )}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const {result, generationId} = await this.run(
+      ctx,
+      userId,
+      'replies',
+      {count: input.items.length},
+      prompt,
+      REPLY_SCHEMA,
+    );
+    const ids = new Set(input.items.map(item => item.id));
+    const replies = new Map<string, {intent: ReplyIntent; needsHuman: boolean; reply: string}>();
+    const payload = (result.json || {}) as {replies?: unknown[]};
+    for (const raw of Array.isArray(payload.replies) ? payload.replies : []) {
+      const row = (raw || {}) as Record<string, unknown>;
+      const id = str(row.id, 80);
+      if (!ids.has(id)) continue;
+      const intent = str(row.intent, 20).toLowerCase() as ReplyIntent;
+      replies.set(id, {
+        intent: INTENTS.has(intent) ? intent : 'other',
+        needsHuman: row.needsHuman === true,
+        reply: str(row.reply, 1000),
+      });
+    }
+    return {generationId, replies};
   }
 
   async feedback(ctx: WorkspaceContext, generationId: string, value: 1 | -1) {

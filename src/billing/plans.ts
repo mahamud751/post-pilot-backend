@@ -21,7 +21,7 @@ export const GRACE_DAYS = 7;
 /** Annual billing discount (PRD section 15). */
 export const ANNUAL_DISCOUNT = 0.2;
 
-export const AI_CREDIT_COST = {captions: 1, content_plan: 5, autopilot: 5, image: 4, video: 4} as const;
+export const AI_CREDIT_COST = {captions: 1, content_plan: 5, autopilot: 5, image: 4, video: 4, replies: 1} as const;
 
 export const PLANS: Record<PlanCode, PlanDefinition> = {
   TRIAL: {

@@ -66,7 +66,11 @@ export class MetaOAuthService {
     const instagram = this.config.get<string>('FACEBOOK_INSTAGRAM_LOGIN_SCOPES')?.trim();
     const instagramEnabled =
       String(this.config.get<string>('FACEBOOK_ENABLE_INSTAGRAM_LOGIN') ?? '').toLowerCase() === 'true';
-    return instagramEnabled && instagram ? `${FB_SCOPES_CORE},${instagram}` : FB_SCOPES_CORE;
+    const base = instagramEnabled && instagram ? `${FB_SCOPES_CORE},${instagram}` : FB_SCOPES_CORE;
+    // Comment and DM replies need extra permissions that require Meta App Review, so they are opt-in:
+    // e.g. pages_read_user_content,pages_manage_engagement,pages_messaging,instagram_manage_comments,instagram_manage_messages
+    const engagement = this.config.get<string>('FACEBOOK_ENGAGEMENT_SCOPES')?.trim();
+    return engagement ? `${base},${engagement}` : base;
   }
 
   configured() {

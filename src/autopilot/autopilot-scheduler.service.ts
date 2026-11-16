@@ -1,5 +1,6 @@
 import {Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy} from '@nestjs/common';
 import {ConfigService} from '@nestjs/config';
+import {EngagementService} from '../engagement/engagement.service';
 import {ExperimentsService} from '../intelligence/experiments.service';
 import {MemoryService} from '../intelligence/memory.service';
 import {NotificationsService} from '../notifications/notifications.service';
@@ -18,7 +19,8 @@ const BATCH = 20;
 /**
  * Hands-free autopilot. Runs in the worker process (same switch as publishing) and:
  *  1. refreshes metrics + experiment checkpoints every 6 hours for enabled workspaces;
- *  2. runs a full autopilot cycle (research → plan → drafts → schedule) every `runEveryDays`
+ *  2. reads new comments and DMs every 5 minutes and drafts or sends replies (replyMode);
+ *  3. runs a full autopilot cycle (research → plan → drafts → schedule) every `runEveryDays`
  *     for workspaces that turned on `scheduleEnabled`.
  * Every row is claimed with a conditional update, so several workers never double-run.
  * Set AUTOPILOT_SCHEDULER=off to disable it without stopping publishing.
@@ -36,6 +38,7 @@ export class AutopilotSchedulerService implements OnApplicationBootstrap, OnModu
     private readonly memory: MemoryService,
     private readonly experiments: ExperimentsService,
     private readonly notifications: NotificationsService,
+    private readonly engagement: EngagementService,
   ) {}
 
   enabled() {
@@ -59,12 +62,46 @@ export class AutopilotSchedulerService implements OnApplicationBootstrap, OnModu
     if (this.running) return;
     this.running = true;
     try {
+      await this.inboxDue();
       await this.syncDue();
       await this.runDue();
     } catch (error) {
       this.logger.error(`Autopilot tick failed: ${messageOf(error)}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Comments and DMs are checked every tick (5 minutes) for workspaces with replies on. */
+  private async inboxDue() {
+    const cutoff = new Date(Date.now() - TICK_MS + 30_000);
+    const due = await this.prisma.autopilotConfig.findMany({
+      where: {
+        enabled: true,
+        replyMode: {not: 'OFF'},
+        workspace: {state: 'active'},
+        OR: [{lastInboxSyncAt: null}, {lastInboxSyncAt: {lt: cutoff}}],
+      },
+      include: {workspace: true},
+      take: BATCH,
+    });
+    for (const row of due) {
+      const claimed = await this.prisma.autopilotConfig.updateMany({
+        where: {id: row.id, lastInboxSyncAt: row.lastInboxSyncAt},
+        data: {lastInboxSyncAt: new Date()},
+      });
+      if (claimed.count === 0) continue;
+      try {
+        const result = await this.engagement.poll(row);
+        await this.prisma.autopilotConfig.update({
+          where: {id: row.id},
+          data: {lastInboxError: result.warnings.length ? result.warnings.join(' ').slice(0, 1000) : null},
+        });
+      } catch (error) {
+        const message = messageOf(error);
+        this.logger.warn(`Inbox poll failed for workspace ${row.workspaceId}: ${message}`);
+        await this.prisma.autopilotConfig.update({where: {id: row.id}, data: {lastInboxError: message}});
+      }
     }
   }
 

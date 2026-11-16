@@ -73,34 +73,35 @@ enum InviteStatus {
 }
 
 model Workspace {
-  id               String            @id @default(uuid())
-  name             String
-  timezone         String            @default("Asia/Dhaka")
-  businessType     String?
-  ownerId          String
-  owner            User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
-  state            String            @default("active")
-  approvalRequired Boolean           @default(false)
-  onboardingStep   String            @default("brand")
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  members          WorkspaceMember[]
-  posts            Post[]
-  media            Media[]
-  auditLogs        AuditLog[]
-  brand            Brand?
-  socialAccounts   SocialAccount[]
-  oauthStates      OAuthState[]
-  aiGenerations    AiGeneration[]
-  contentPlans     ContentPlan[]
-  autopilot        AutopilotConfig?
+  id                  String              @id @default(uuid())
+  name                String
+  timezone            String              @default("Asia/Dhaka")
+  businessType        String?
+  ownerId             String
+  owner               User                @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  state               String              @default("active")
+  approvalRequired    Boolean             @default(false)
+  onboardingStep      String              @default("brand")
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  members             WorkspaceMember[]
+  posts               Post[]
+  media               Media[]
+  auditLogs           AuditLog[]
+  brand               Brand?
+  socialAccounts      SocialAccount[]
+  oauthStates         OAuthState[]
+  aiGenerations       AiGeneration[]
+  contentPlans        ContentPlan[]
+  autopilot           AutopilotConfig?
   performanceMemories PerformanceMemory[]
-  experiments      GrowthExperiment[]
-  trendSignals     TrendSignal[]
-  competitors      CompetitorAccount[]
-  sales            Sale[]
-  subscription     Subscription?
-  invoices         Invoice[]
+  experiments         GrowthExperiment[]
+  trendSignals        TrendSignal[]
+  competitors         CompetitorAccount[]
+  sales               Sale[]
+  engagementItems     EngagementItem[]
+  subscription        Subscription?
+  invoices            Invoice[]
 }
 
 model WorkspaceMember {
@@ -212,6 +213,7 @@ model SocialAccount {
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
   targets           PostTarget[]
+  engagementItems   EngagementItem[]
 
   @@unique([platform, platformAccountId, workspaceId])
   @@index([workspaceId, status])
@@ -263,46 +265,46 @@ model Media {
 // ---------- Posts, targets and publishing (FR-06, FR-08..FR-10, FR-14) ----------
 
 model Post {
-  id              String       @id @default(uuid())
-  workspaceId     String
-  workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  userId          String
-  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title           String?
+  id                 String              @id @default(uuid())
+  workspaceId        String
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title              String?
   /// Master text; each target may override it with channelText
-  caption         String
-  mediaIds        String[]     @default([])
-  mediaUrl        String?
-  thumbnailUrl    String?
-  mediaType       String?
+  caption            String
+  mediaIds           String[]            @default([])
+  mediaUrl           String?
+  thumbnailUrl       String?
+  mediaType          String?
   /// Legacy platform list; targets are the source of truth
-  platforms       String[]
+  platforms          String[]
   /// draft | in_review | approved | scheduled | processing | published | failed | cancelled | needs_action
-  status          String       @default("draft")
-  scheduledAt     DateTime?
-  contentVersion  Int          @default(1)
-  approvedVersion Int?
-  approvedById    String?
-  approvedAt      DateTime?
-  complianceFlags String[]     @default([])
-  contentPlanId   String?
-  contentPlan     ContentPlan? @relation(fields: [contentPlanId], references: [id], onDelete: SetNull)
-  aiGenerationId  String?
+  status             String              @default("draft")
+  scheduledAt        DateTime?
+  contentVersion     Int                 @default(1)
+  approvedVersion    Int?
+  approvedById       String?
+  approvedAt         DateTime?
+  complianceFlags    String[]            @default([])
+  contentPlanId      String?
+  contentPlan        ContentPlan?        @relation(fields: [contentPlanId], references: [id], onDelete: SetNull)
+  aiGenerationId     String?
   /// Set by the content planner or autopilot; null on hand-written posts
-  contentPillar   String?
+  contentPillar      String?
   /// content_plan | autopilot; null when a person wrote the post
-  source          String?
+  source             String?
   experimentVariants ExperimentVariant[]
   sales              Sale[]
-  facebookPostId  String?
-  reach           Int          @default(0)
-  impressions     Int          @default(0)
-  engagements     Int          @default(0)
-  clicks          Int          @default(0)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  targets         PostTarget[]
-  reviews         PostReview[]
+  facebookPostId     String?
+  reach              Int                 @default(0)
+  impressions        Int                 @default(0)
+  engagements        Int                 @default(0)
+  clicks             Int                 @default(0)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  targets            PostTarget[]
+  reviews            PostReview[]
 
   @@index([workspaceId, status])
   @@index([workspaceId, scheduledAt])
@@ -319,19 +321,19 @@ enum TargetStatus {
 }
 
 model PostTarget {
-  id               String           @id @default(uuid())
+  id               String             @id @default(uuid())
   postId           String
-  post             Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  post             Post               @relation(fields: [postId], references: [id], onDelete: Cascade)
   socialAccountId  String?
-  socialAccount    SocialAccount?   @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  socialAccount    SocialAccount?     @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
   platform         SocialPlatform
   channelText      String?
   scheduledAt      DateTime?
-  status           TargetStatus     @default(PENDING)
+  status           TargetStatus       @default(PENDING)
   /// Changes on every (re)schedule; a queued job only runs if its token still matches
   jobToken         String?
-  idempotencyKey   String           @unique
-  attemptCount     Int              @default(0)
+  idempotencyKey   String             @unique
+  attemptCount     Int                @default(0)
   nextAttemptAt    DateTime?
   remotePostId     String?
   remoteUrl        String?
@@ -345,8 +347,8 @@ model PostTarget {
   shares           Int?
   videoViews       Int?
   metricsFetchedAt DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
   attempts         PublishAttempt[]
   memory           PerformanceMemory?
 
@@ -475,6 +477,18 @@ model AutopilotConfig {
   lastAutoRunError   String?
   /// Last background refresh of metrics and experiment checkpoints.
   lastSyncAt         DateTime?
+  /// Auto-reply to comments and DMs. OFF ignores the inbox entirely.
+  replyMode          ReplyMode     @default(OFF)
+  replyComments      Boolean       @default(true)
+  replyDms           Boolean       @default(true)
+  /// Extra guidance for replies, e.g. "Send order questions to WhatsApp 01XXXXXXXXX".
+  replyInstructions  String?
+  /// Automatic replies per hour across the workspace.
+  replyHourlyLimit   Int           @default(20)
+  /// Only messages received after this are answered, so switching on never replies to an old backlog.
+  repliesSince       DateTime?
+  lastInboxSyncAt    DateTime?
+  lastInboxError     String?
   /// SHA-256 of the store webhook key. The raw key is shown once.
   conversionKeyHash  String?       @unique
   createdAt          DateTime      @default(now())
@@ -483,66 +497,124 @@ model AutopilotConfig {
   @@index([scheduleEnabled, nextAutoRunAt])
 }
 
+enum ReplyMode {
+  OFF
+  DRAFT
+  AUTO
+}
+
+enum EngagementKind {
+  COMMENT
+  DM
+}
+
+enum EngagementStatus {
+  NEW
+  DRAFTED
+  SENDING
+  REPLIED
+  NEEDS_HUMAN
+  SKIPPED
+  FAILED
+}
+
+/// A comment or direct message received on a connected account, and PostPilot's reply to it.
+model EngagementItem {
+  id              String           @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  socialAccountId String
+  socialAccount   SocialAccount    @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+  platform        SocialPlatform
+  kind            EngagementKind
+  /// Comment id, or message id for a DM
+  externalId      String
+  /// Post/media id for a comment, conversation id for a DM
+  threadId        String
+  /// Who wrote it: PSID/IGSID for a DM recipient, commenter id otherwise
+  authorId        String?
+  authorName      String?
+  text            String
+  permalink       String?
+  receivedAt      DateTime
+  status          EngagementStatus @default(NEW)
+  /// question | praise | complaint | order | spam | other
+  intent          String?
+  replyText       String?
+  replyExternalId String?
+  /// Why it stopped short of an automatic reply
+  reason          String?
+  /// Null when autopilot sent it
+  sentById        String?
+  repliedAt       DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([socialAccountId, externalId])
+  @@index([workspaceId, status, receivedAt])
+  @@index([workspaceId, repliedAt])
+}
+
 /// One row per published target, rebuilt from metrics the connected account is allowed to return.
 model PerformanceMemory {
-  id             String         @id @default(uuid())
-  workspaceId    String
-  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  postTargetId   String         @unique
-  postTarget     PostTarget     @relation(fields: [postTargetId], references: [id], onDelete: Cascade)
-  platform       SocialPlatform
-  contentPillar  String?
+  id            String         @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  postTargetId  String         @unique
+  postTarget    PostTarget     @relation(fields: [postTargetId], references: [id], onDelete: Cascade)
+  platform      SocialPlatform
+  contentPillar String?
   /// text | photo | video, from the post's own media
-  format         String
-  hook           String?
-  publishedAt    DateTime
+  format        String
+  hook          String?
+  publishedAt   DateTime
   /// Hour in the workspace timezone, 0–23
-  localHour      Int
-  weekday        Int
-  reach          Int?
-  impressions    Int?
-  engagements    Int?
-  clicks         Int?
-  saves          Int?
-  shares         Int?
-  videoViews     Int?
+  localHour     Int
+  weekday       Int
+  reach         Int?
+  impressions   Int?
+  engagements   Int?
+  clicks        Int?
+  saves         Int?
+  shares        Int?
+  videoViews    Int?
   /// Minor currency units attributed to this post. Null when this row is not the attribution target.
-  salesAmount    Int?
-  salesCount     Int?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  salesAmount   Int?
+  salesCount    Int?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@index([workspaceId, publishedAt])
 }
 
 model GrowthExperiment {
-  id           String           @id @default(uuid())
+  id           String              @id @default(uuid())
   workspaceId  String
-  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace    Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   hypothesis   String
   goal         GrowthGoal
-  status       ExperimentStatus @default(PROPOSED)
+  status       ExperimentStatus    @default(PROPOSED)
   learning     String?
   winnerPostId String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
   variants     ExperimentVariant[]
 
   @@index([workspaceId, createdAt])
 }
 
 model ExperimentVariant {
-  id            String           @id @default(uuid())
-  experimentId  String
-  experiment    GrowthExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
-  postId        String           @unique
-  post          Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
-  label         String
-  hook          String
-  checkpoint24  Json?
-  checkpoint48  Json?
-  checkpoint7d  Json?
-  createdAt     DateTime         @default(now())
+  id           String           @id @default(uuid())
+  experimentId String
+  experiment   GrowthExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  postId       String           @unique
+  post         Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  label        String
+  hook         String
+  checkpoint24 Json?
+  checkpoint48 Json?
+  checkpoint7d Json?
+  createdAt    DateTime         @default(now())
 
   @@index([experimentId])
 }
@@ -563,18 +635,18 @@ model TrendSignal {
 
 /// A page or professional account the workspace asked to watch, read only through the official API.
 model CompetitorAccount {
-  id            String            @id @default(uuid())
+  id            String             @id @default(uuid())
   workspaceId   String
-  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace     Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   platform      SocialPlatform
   externalId    String
   name          String
   audienceCount Int?
   /// ok | permission_required | error
-  status        String            @default("ok")
+  status        String             @default("ok")
   statusReason  String?
   lastCheckedAt DateTime?
-  createdAt     DateTime          @default(now())
+  createdAt     DateTime           @default(now())
   signals       CompetitorSignal[]
 
   @@unique([workspaceId, platform, externalId])

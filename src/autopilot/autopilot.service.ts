@@ -60,7 +60,12 @@ export class AutopilotService {
     const before = await this.getConfig(ctx.id);
     const config = await this.prisma.autopilotConfig.update({
       where: {workspaceId: ctx.id},
-      data: {...input, ...nextRunPatch(before, input)},
+      data: {
+        ...input,
+        ...nextRunPatch(before, input),
+        // Turning replies on starts from now, so an old backlog is never answered in bulk.
+        ...(input.replyMode && input.replyMode !== 'OFF' && before.replyMode === 'OFF' ? {repliesSince: new Date()} : {}),
+      },
     });
     await this.audit.record({
       workspaceId: ctx.id,
@@ -75,6 +80,7 @@ export class AutopilotService {
         goal: config.goal,
         scheduleEnabled: config.scheduleEnabled,
         runEveryDays: config.runEveryDays,
+        replyMode: config.replyMode,
       },
     });
     return {config};

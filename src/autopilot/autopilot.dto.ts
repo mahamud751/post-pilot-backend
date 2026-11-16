@@ -1,7 +1,7 @@
 import {ApiPropertyOptional} from '@nestjs/swagger';
-import {AutopilotMode, GrowthGoal} from '@prisma/client';
+import {AutopilotMode, GrowthGoal, ReplyMode} from '@prisma/client';
 import {Type} from 'class-transformer';
-import {IsBoolean, IsEnum, IsInt, IsOptional, Max, Min} from 'class-validator';
+import {IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min} from 'class-validator';
 
 export class UpdateAutopilotDto {
   @ApiPropertyOptional()
@@ -77,4 +77,33 @@ export class UpdateAutopilotDto {
   @Min(1)
   @Max(30)
   runEveryDays?: number;
+
+  @ApiPropertyOptional({enum: ReplyMode, description: 'OFF, DRAFT (suggest replies) or AUTO (send safe replies).'})
+  @IsOptional()
+  @IsEnum(ReplyMode)
+  replyMode?: ReplyMode;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  replyComments?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  replyDms?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  replyInstructions?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  replyHourlyLimit?: number;
 }
