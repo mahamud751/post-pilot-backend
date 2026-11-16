@@ -8,73 +8,679 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  name         String
-  email        String   @unique
-  avatarUrl    String?
-  facebookUrl  String?
-  instagramUrl String?
-  youtubeUrl   String?
-  facebookName String?
-  instagramName String?
-  youtubeName  String?
-  facebookVerified Boolean @default(false)
-  instagramVerified Boolean @default(false)
-  youtubeVerified Boolean @default(false)
-  facebookUserAccessToken String?
-  facebookPageId String?
-  facebookPageName String?
-  facebookPageAccessToken String?
+  id                 String    @id @default(uuid())
+  name               String
+  email              String    @unique
+  avatarUrl          String?
+  passwordHash       String?
+  googleId           String?   @unique
+  emailVerifiedAt    DateTime?
+  tosAcceptedAt      DateTime?
+  isSuperAdmin       Boolean   @default(false)
+  emailNotifications Boolean   @default(true)
+
+  // Legacy per-user social fields. Tokens are moved into encrypted SocialAccount rows on boot
+  // and cleared here; the remaining columns are kept for the mobile app until it is updated.
+  facebookUrl                String?
+  instagramUrl               String?
+  youtubeUrl                 String?
+  facebookName               String?
+  instagramName              String?
+  youtubeName                String?
+  facebookVerified           Boolean @default(false)
+  instagramVerified          Boolean @default(false)
+  youtubeVerified            Boolean @default(false)
+  facebookUserAccessToken    String?
+  facebookPageId             String?
+  facebookPageName           String?
+  facebookPageAccessToken    String?
   instagramBusinessAccountId String?
-  passwordHash String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  posts         Post[]
-  media         Media[]
-  notifications Notification[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  posts           Post[]
+  media           Media[]
+  notifications   Notification[]
+  memberships     WorkspaceMember[]
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  emailTokens     EmailToken[]
+}
+
+model EmailToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   String // verify_email | reset_password
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, purpose])
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  EDITOR
+  APPROVER
+  VIEWER
+}
+
+enum InviteStatus {
+  PENDING
+  ACTIVE
+}
+
+model Workspace {
+  id               String            @id @default(uuid())
+  name             String
+  timezone         String            @default("Asia/Dhaka")
+  businessType     String?
+  ownerId          String
+  owner            User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  state            String            @default("active")
+  approvalRequired Boolean           @default(false)
+  onboardingStep   String            @default("brand")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  members          WorkspaceMember[]
+  posts            Post[]
+  media            Media[]
+  auditLogs        AuditLog[]
+  brand            Brand?
+  socialAccounts   SocialAccount[]
+  oauthStates      OAuthState[]
+  aiGenerations    AiGeneration[]
+  contentPlans     ContentPlan[]
+  autopilot        AutopilotConfig?
+  performanceMemories PerformanceMemory[]
+  experiments      GrowthExperiment[]
+  trendSignals     TrendSignal[]
+  competitors      CompetitorAccount[]
+  sales            Sale[]
+  subscription     Subscription?
+  invoices         Invoice[]
+}
+
+model WorkspaceMember {
+  id           String        @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role         WorkspaceRole
+  inviteStatus InviteStatus  @default(ACTIVE)
+  createdAt    DateTime      @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model AuditLog {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String
-  title     String
-  body      String
-  read      Boolean  @default(false)
-  meta      Json?
-  createdAt DateTime @default(now())
-}
-
-model Media {
-  id           String   @id @default(uuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  originalName String
-  filename     String
-  mimeType     String
-  url          String
-  size         Int
-  createdAt    DateTime @default(now())
-}
-
-model Post {
   id          String   @id @default(uuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  caption     String
-  mediaUrl    String?
-  thumbnailUrl String?
-  mediaType   String?
-  platforms   String[]
-  status          String   @default("draft")
-  scheduledAt     DateTime?
-  facebookPostId  String?
-  reach           Int      @default(0)
-  impressions     Int      @default(0)
-  engagements     Int      @default(0)
-  clicks          Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  workspaceId String?
+  type        String
+  title       String
+  body        String
+  read        Boolean  @default(false)
+  meta        Json?
+  dedupeKey   String?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt])
 }
 
+// ---------- Brand kit (FR-02) ----------
+
+model Brand {
+  id              String    @id @default(uuid())
+  workspaceId     String    @unique
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  audience        String?
+  /// [{name, description?, price?}] — prices here are the only ones AI may mention
+  products        Json      @default("[]")
+  /// [{title, details?, validUntil?}] — the only promotions AI may mention
+  approvedOffers  Json      @default("[]")
+  doNotSay        String[]  @default([])
+  tone            String    @default("friendly")
+  /// en | bn | mixed
+  languages       String[]  @default(["en"])
+  website         String?
+  ctas            String[]  @default([])
+  mediaGuidelines String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// ---------- Social accounts (FR-03) ----------
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+  YOUTUBE
+  LINKEDIN
+  TIKTOK
+}
+
+enum SocialAccountStatus {
+  CONNECTED
+  EXPIRED
+  REVOKED
+  ERROR
+}
+
+model SocialAccount {
+  id                String              @id @default(uuid())
+  workspaceId       String
+  workspace         Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform          SocialPlatform
+  platformAccountId String
+  name              String
+  handle            String?
+  pictureUrl        String?
+  /// AES-256-GCM ciphertext; never returned by the API
+  accessTokenEnc    String
+  refreshTokenEnc   String?
+  scopes            String[]            @default([])
+  expiresAt         DateTime?
+  status            SocialAccountStatus @default(CONNECTED)
+  statusReason      String?
+  /// Platform extras, e.g. {pageId} for an Instagram account published through a Page token
+  meta              Json?
+  connectedById     String?
+  lastCheckedAt     DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  targets           PostTarget[]
+
+  @@unique([platform, platformAccountId, workspaceId])
+  @@index([workspaceId, status])
+}
+
+/// Single-use OAuth state; also holds the encrypted page list until the user picks pages.
+model OAuthState {
+  id            String         @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId        String
+  platform      SocialPlatform
+  nonceHash     String         @unique
+  codeVerifier  String?
+  candidatesEnc String?
+  expiresAt     DateTime
+  usedAt        DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime       @default(now())
+}
+
+// ---------- Media (FR-07) ----------
+
+model Media {
+  id           String    @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  originalName String
+  filename     String
+  /// Path under the upload root; legacy rows live at the root and are served from /uploads
+  storageKey   String?
+  mimeType     String
+  url          String
+  size         Int
+  sha256       String?
+  width        Int?
+  height       Int?
+  durationSec  Float?
+  folder       String?
+  tags         String[]  @default([])
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+// ---------- Posts, targets and publishing (FR-06, FR-08..FR-10, FR-14) ----------
+
+model Post {
+  id              String       @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title           String?
+  /// Master text; each target may override it with channelText
+  caption         String
+  mediaIds        String[]     @default([])
+  mediaUrl        String?
+  thumbnailUrl    String?
+  mediaType       String?
+  /// Legacy platform list; targets are the source of truth
+  platforms       String[]
+  /// draft | in_review | approved | scheduled | processing | published | failed | cancelled | needs_action
+  status          String       @default("draft")
+  scheduledAt     DateTime?
+  contentVersion  Int          @default(1)
+  approvedVersion Int?
+  approvedById    String?
+  approvedAt      DateTime?
+  complianceFlags String[]     @default([])
+  contentPlanId   String?
+  contentPlan     ContentPlan? @relation(fields: [contentPlanId], references: [id], onDelete: SetNull)
+  aiGenerationId  String?
+  /// Set by the content planner or autopilot; null on hand-written posts
+  contentPillar   String?
+  /// content_plan | autopilot; null when a person wrote the post
+  source          String?
+  experimentVariants ExperimentVariant[]
+  sales              Sale[]
+  facebookPostId  String?
+  reach           Int          @default(0)
+  impressions     Int          @default(0)
+  engagements     Int          @default(0)
+  clicks          Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  targets         PostTarget[]
+  reviews         PostReview[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, scheduledAt])
+}
+
+enum TargetStatus {
+  PENDING
+  SCHEDULED
+  PROCESSING
+  PUBLISHED
+  FAILED
+  CANCELLED
+  NEEDS_ACTION
+}
+
+model PostTarget {
+  id               String           @id @default(uuid())
+  postId           String
+  post             Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccountId  String?
+  socialAccount    SocialAccount?   @relation(fields: [socialAccountId], references: [id], onDelete: SetNull)
+  platform         SocialPlatform
+  channelText      String?
+  scheduledAt      DateTime?
+  status           TargetStatus     @default(PENDING)
+  /// Changes on every (re)schedule; a queued job only runs if its token still matches
+  jobToken         String?
+  idempotencyKey   String           @unique
+  attemptCount     Int              @default(0)
+  nextAttemptAt    DateTime?
+  remotePostId     String?
+  remoteUrl        String?
+  lastError        String?
+  publishedAt      DateTime?
+  reach            Int?
+  impressions      Int?
+  engagements      Int?
+  clicks           Int?
+  saves            Int?
+  shares           Int?
+  videoViews       Int?
+  metricsFetchedAt DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  attempts         PublishAttempt[]
+  memory           PerformanceMemory?
+
+  @@index([socialAccountId, scheduledAt])
+  @@index([status, scheduledAt])
+  @@index([postId])
+}
+
+model PublishAttempt {
+  id             String     @id @default(uuid())
+  targetId       String
+  target         PostTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  attempt        Int
+  /// success | transient_error | permanent_error | auth_error | ambiguous | reconciled | precheck_failed
+  outcome        String?
+  providerCode   String?
+  sanitizedError String?
+  remotePostId   String?
+  /// Instagram container id etc., kept so an ambiguous attempt can be reconciled
+  containerId    String?
+  startedAt      DateTime   @default(now())
+  completedAt    DateTime?
+
+  @@index([targetId, attempt])
+}
+
+model PostReview {
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  actorId   String
+  /// submitted | approved | rejected | comment | reopened
+  action    String
+  comment   String?
+  version   Int
+  createdAt DateTime @default(now())
+
+  @@index([postId, createdAt])
+}
+
+// ---------- AI (FR-04, FR-05, section 12) ----------
+
+model AiGeneration {
+  id            String    @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId        String
+  /// captions | content_plan
+  feature       String
+  provider      String
+  model         String
+  credits       Int       @default(1)
+  inputTokens   Int?
+  outputTokens  Int?
+  /// USD, from the per-model price table; null when the provider reports no usage
+  estimatedCost Decimal?  @db.Decimal(10, 6)
+  request       Json
+  output        Json?
+  feedback      Int?
+  error         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+model ContentPlan {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorId    String
+  periodDays  Int
+  startDate   DateTime
+  prompt      Json
+  items       Json
+  createdAt   DateTime  @default(now())
+  posts       Post[]
+
+  @@index([workspaceId, createdAt])
+}
+
+// ---------- Autopilot memory and experiments ----------
+
+enum AutopilotMode {
+  DRAFT
+  APPROVAL
+  AUTO
+}
+
+enum GrowthGoal {
+  AWARENESS
+  ENGAGEMENT
+  LEADS
+  SALES
+}
+
+enum ExperimentStatus {
+  PROPOSED
+  RUNNING
+  COMPLETED
+  CANCELLED
+}
+
+/// Per-workspace kill switch and operating rules. Absent until the first settings read.
+model AutopilotConfig {
+  id                 String        @id @default(uuid())
+  workspaceId        String        @unique
+  workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// Master switch. Off means a run does nothing.
+  enabled            Boolean       @default(false)
+  mode               AutopilotMode @default(DRAFT)
+  autopublishEnabled Boolean       @default(false)
+  goal               GrowthGoal    @default(ENGAGEMENT)
+  postsPerWeek       Int           @default(3)
+  dailyPostLimit     Int           @default(2)
+  analyzeEnabled     Boolean       @default(true)
+  generateEnabled    Boolean       @default(true)
+  optimizeSchedule   Boolean       @default(true)
+  /// Public news and pages the workspace names. Never a scan of every Facebook Page.
+  researchEnabled    Boolean       @default(true)
+  creativesEnabled   Boolean       @default(false)
+  /// Hands-free mode: the worker runs autopilot on its own every `runEveryDays` days.
+  scheduleEnabled    Boolean       @default(false)
+  runEveryDays       Int           @default(7)
+  nextAutoRunAt      DateTime?
+  lastAutoRunAt      DateTime?
+  lastAutoRunError   String?
+  /// Last background refresh of metrics and experiment checkpoints.
+  lastSyncAt         DateTime?
+  /// SHA-256 of the store webhook key. The raw key is shown once.
+  conversionKeyHash  String?       @unique
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([scheduleEnabled, nextAutoRunAt])
+}
+
+/// One row per published target, rebuilt from metrics the connected account is allowed to return.
+model PerformanceMemory {
+  id             String         @id @default(uuid())
+  workspaceId    String
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  postTargetId   String         @unique
+  postTarget     PostTarget     @relation(fields: [postTargetId], references: [id], onDelete: Cascade)
+  platform       SocialPlatform
+  contentPillar  String?
+  /// text | photo | video, from the post's own media
+  format         String
+  hook           String?
+  publishedAt    DateTime
+  /// Hour in the workspace timezone, 0–23
+  localHour      Int
+  weekday        Int
+  reach          Int?
+  impressions    Int?
+  engagements    Int?
+  clicks         Int?
+  saves          Int?
+  shares         Int?
+  videoViews     Int?
+  /// Minor currency units attributed to this post. Null when this row is not the attribution target.
+  salesAmount    Int?
+  salesCount     Int?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([workspaceId, publishedAt])
+}
+
+model GrowthExperiment {
+  id           String           @id @default(uuid())
+  workspaceId  String
+  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  hypothesis   String
+  goal         GrowthGoal
+  status       ExperimentStatus @default(PROPOSED)
+  learning     String?
+  winnerPostId String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  variants     ExperimentVariant[]
+
+  @@index([workspaceId, createdAt])
+}
+
+model ExperimentVariant {
+  id            String           @id @default(uuid())
+  experimentId  String
+  experiment    GrowthExperiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  postId        String           @unique
+  post          Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  label         String
+  hook          String
+  checkpoint24  Json?
+  checkpoint48  Json?
+  checkpoint7d  Json?
+  createdAt     DateTime         @default(now())
+
+  @@index([experimentId])
+}
+
+/// Public headline from a news search for this brand's niche. Not a Facebook Page scan.
+model TrendSignal {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  source      String
+  title       String
+  url         String?
+  topic       String
+  fetchedAt   DateTime  @default(now())
+
+  @@index([workspaceId, fetchedAt])
+}
+
+/// A page or professional account the workspace asked to watch, read only through the official API.
+model CompetitorAccount {
+  id            String            @id @default(uuid())
+  workspaceId   String
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  platform      SocialPlatform
+  externalId    String
+  name          String
+  audienceCount Int?
+  /// ok | permission_required | error
+  status        String            @default("ok")
+  statusReason  String?
+  lastCheckedAt DateTime?
+  createdAt     DateTime          @default(now())
+  signals       CompetitorSignal[]
+
+  @@unique([workspaceId, platform, externalId])
+  @@index([workspaceId])
+}
+
+model CompetitorSignal {
+  id             String            @id @default(uuid())
+  competitorId   String
+  competitor     CompetitorAccount @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+  externalPostId String?
+  text           String?
+  permalink      String?
+  mediaType      String?
+  postedAt       DateTime?
+  likes          Int?
+  comments       Int?
+  shares         Int?
+  fetchedAt      DateTime          @default(now())
+
+  @@index([competitorId, fetchedAt])
+}
+
+/// A real order the workspace recorded or a store reported. Not inferred from reach.
+model Sale {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  postId      String?
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: SetNull)
+  /// Minor units, e.g. poisha
+  amount      Int
+  currency    String    @default("BDT")
+  quantity    Int       @default(1)
+  /// manual | webhook
+  source      String
+  externalRef String?
+  note        String?
+  occurredAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, externalRef])
+  @@index([workspaceId, occurredAt])
+}
+
+// ---------- Plans and billing (FR-12) ----------
+
+enum PlanCode {
+  TRIAL
+  STARTER
+  GROWTH
+  AGENCY
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
+model Subscription {
+  id                 String             @id @default(uuid())
+  workspaceId        String             @unique
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan               PlanCode           @default(TRIAL)
+  status             SubscriptionStatus @default(TRIALING)
+  billingCycle       String             @default("monthly")
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime
+  graceEndsAt        DateTime?
+  cancelAtPeriodEnd  Boolean            @default(false)
+  provider           String?
+  providerRef        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+}
+
+model Invoice {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan        PlanCode
+  /// Amount in poisha (1/100 BDT)
+  amount      Int
+  currency    String    @default("BDT")
+  status      String
+  periodStart DateTime
+  periodEnd   DateTime
+  provider    String
+  providerRef String?
+  issuedAt    DateTime  @default(now())
+
+  @@index([workspaceId, issuedAt])
+}
+
+model BillingEvent {
+  id          String   @id @default(uuid())
+  provider    String
+  eventId     String
+  type        String
+  workspaceId String?
+  payload     Json
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}

@@ -1,13 +1,11 @@
 import {Module} from '@nestjs/common';
+import {IntelligenceModule} from '../intelligence/intelligence.module';
 import {AnalyticsController} from './analytics.controller';
 import {AnalyticsService} from './analytics.service';
-import {FacebookInsightsService} from './facebook-insights.service';
-import {MetricsService} from './metrics.service';
 
 @Module({
+  imports: [IntelligenceModule],
   controllers: [AnalyticsController],
-  providers: [AnalyticsService, MetricsService, FacebookInsightsService],
-  exports: [MetricsService],
+  providers: [AnalyticsService],
 })
 export class AnalyticsModule {}
-

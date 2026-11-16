@@ -1,10 +1,10 @@
 import {Module} from '@nestjs/common';
-import {AnalyticsModule} from '../analytics/analytics.module';
+import {PostsModule} from '../posts/posts.module';
 import {DashboardController} from './dashboard.controller';
 import {DashboardService} from './dashboard.service';
 
 @Module({
-  imports: [AnalyticsModule],
+  imports: [PostsModule],
   controllers: [DashboardController],
   providers: [DashboardService],
 })

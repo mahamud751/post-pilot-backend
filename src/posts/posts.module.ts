@@ -8,4 +8,3 @@ import {PostsService} from './posts.service';
   exports: [PostsService],
 })
 export class PostsModule {}
-
