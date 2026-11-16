@@ -425,7 +425,10 @@ export class PostsService {
     for (const t of post.targets.filter(t => t.status === 'SCHEDULED')) {
       await this.queue.remove(t.id, t.jobToken);
     }
-    await this.prisma.post.delete({where: {id}});
+    await this.prisma.$transaction(async tx => {
+      if (post.campaignItemId) await tx.campaignItem.update({where: {id: post.campaignItemId}, data: {status: 'SKIPPED', error: 'Removed by a workspace member.'}});
+      await tx.post.delete({where: {id}});
+    });
     await this.audit.record({
       workspaceId: ctx.id,
       actorId: userId,
@@ -649,6 +652,10 @@ export class PostsService {
 
     const tokens = candidates.map(t => ({id: t.id, token: randomUUID()}));
     await this.prisma.$transaction(async tx => {
+      if (post.campaignItemId) {
+        const campaigns = await tx.$queryRaw<{status: string}[]>`SELECT c."status" FROM "Campaign" c JOIN "CampaignItem" i ON i."campaignId" = c."id" WHERE i."id" = ${post.campaignItemId} FOR UPDATE OF c`;
+        if (campaigns.some(campaign => ['CANCELLED', 'PAUSED'].includes(campaign.status))) throw new ConflictException('Resume this campaign before scheduling its posts.');
+      }
       for (const {id: targetId, token} of tokens) {
         await tx.postTarget.update({
           where: {id: targetId},

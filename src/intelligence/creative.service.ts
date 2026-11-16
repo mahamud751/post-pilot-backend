@@ -1,6 +1,7 @@
 import {Injectable, ServiceUnavailableException} from '@nestjs/common';
 import {ConfigService} from '@nestjs/config';
-import {spawn} from 'child_process';
+import {execFile, spawn} from 'child_process';
+import {promisify} from 'util';
 import {randomUUID} from 'crypto';
 import {writeFile, mkdtemp, rm} from 'fs/promises';
 import {tmpdir} from 'os';
@@ -8,6 +9,7 @@ import {join} from 'path';
 import {EntitlementsService} from '../billing/entitlements.service';
 import {AI_CREDIT_COST} from '../billing/plans';
 import {MediaService} from '../media/media.service';
+import {PostsService} from '../posts/posts.service';
 import {PrismaService} from '../prisma/prisma.service';
 import type {WorkspaceContext} from '../workspaces/workspace.guard';
 
@@ -20,7 +22,14 @@ export class CreativeService {
     private readonly media: MediaService,
     private readonly prisma: PrismaService,
     private readonly entitlements: EntitlementsService,
+    private readonly posts: PostsService,
   ) {}
+
+  async capabilities() {
+    const imageConfigured = Boolean(this.config.get<string>('OPENAI_API_KEY') || this.config.get<string>('GEMINI_API_KEY'));
+    const ffmpeg = await promisify(execFile)('ffmpeg', ['-version'], {timeout: 3000}).then(() => true, () => false);
+    return {imageConfigured, ffmpeg};
+  }
 
   /**
    * Image and thumbnail come from the configured image model.
@@ -33,7 +42,7 @@ export class CreativeService {
     if (!prompt) throw new ServiceUnavailableException('Describe the image to create.');
     const portrait = input.kind !== 'thumbnail';
     const still = await this.generateStill(prompt, portrait ? '1024x1536' : '1536x1024');
-    const jpeg = await this.toJpeg(still);
+    const jpeg = await this.toJpeg(still, portrait);
     const image = await this.media.saveGenerated(ctx.id, userId, {
       bytes: jpeg || still,
       originalName: jpeg ? 'creative.jpg' : input.kind === 'thumbnail' ? 'thumbnail.png' : 'creative.png',
@@ -58,17 +67,8 @@ export class CreativeService {
     }
     const attached = video || image;
     if (input.postId) {
-      const post = await this.prisma.post.findFirst({where: {id: input.postId, workspaceId: ctx.id}, select: {id: true, mediaIds: true}});
-      if (post) {
-        await this.prisma.post.update({
-          where: {id: post.id},
-          data: {
-            mediaIds: video ? [video.id] : [...post.mediaIds, image.id].slice(0, 10),
-            mediaType: video ? 'video' : 'image',
-            thumbnailUrl: image.url,
-          },
-        });
-      }
+      const post = await this.prisma.post.findFirstOrThrow({where: {id: input.postId, workspaceId: ctx.id}, select: {id: true, mediaIds: true}});
+      await this.posts.update(ctx, userId, post.id, {mediaIds: video ? [video.id] : [...post.mediaIds, image.id].slice(0, 10)});
     }
     await this.prisma.aiGeneration.create({
       data: {
@@ -140,14 +140,14 @@ export class CreativeService {
     return Buffer.from(b64, 'base64');
   }
 
-  private async toJpeg(still: Buffer) {
+  private async toJpeg(still: Buffer, portrait: boolean) {
     const dir = await mkdtemp(join(tmpdir(), 'postpilot-jpg-'));
     try {
       const png = join(dir, 'still.png');
       const jpg = join(dir, 'still.jpg');
       await writeFile(png, still);
       await new Promise<void>((resolve, reject) => {
-        const child = spawn('ffmpeg', ['-y', '-i', png, '-q:v', '3', jpg], {stdio: 'ignore'});
+        const child = spawn('ffmpeg', ['-y', '-i', png, '-vf', portrait ? 'scale=1080:1350:force_original_aspect_ratio=increase,crop=1080:1350' : 'scale=1536:1024:force_original_aspect_ratio=increase,crop=1536:1024', '-q:v', '3', jpg], {stdio: 'ignore'});
         child.on('error', reject);
         child.on('close', code => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`))));
       });

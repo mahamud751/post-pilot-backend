@@ -93,6 +93,7 @@ model Workspace {
   oauthStates         OAuthState[]
   aiGenerations       AiGeneration[]
   contentPlans        ContentPlan[]
+  campaigns        Campaign[]
   autopilot           AutopilotConfig?
   performanceMemories PerformanceMemory[]
   experiments         GrowthExperiment[]
@@ -287,6 +288,8 @@ model Post {
   approvedById       String?
   approvedAt         DateTime?
   complianceFlags    String[]            @default([])
+  campaignItemId     String?             @unique
+  campaignItem       CampaignItem?       @relation(fields: [campaignItemId], references: [id], onDelete: SetNull)
   contentPlanId      String?
   contentPlan        ContentPlan?        @relation(fields: [contentPlanId], references: [id], onDelete: SetNull)
   aiGenerationId     String?
@@ -755,4 +758,58 @@ model BillingEvent {
   processedAt DateTime @default(now())
 
   @@unique([provider, eventId])
+}
+
+
+/// A durable, daily content campaign. The worker prepares items even while the browser is closed.
+model Campaign {
+  id              String         @id @default(uuid())
+  workspaceId     String
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorId        String
+  requestId       String
+  name            String
+  days            Int
+  startDate       String
+  postTime        String
+  timezone        String
+  accountIds      String[]
+  language        String?
+  goal            String?
+  themes          String?
+  /// TEXT | UPLOAD | AI_IMAGE | AI_VIDEO
+  mediaMode       String
+  /// Uploaded files rotate in this order, one file per day.
+  mediaIds        String[]       @default([])
+  autoSchedule    Boolean        @default(false)
+  /// QUEUED | GENERATING | READY | NEEDS_ATTENTION | PAUSED | CANCELLED
+  status          String         @default("QUEUED")
+  error           String?
+  leaseToken      String?
+  leaseUntil      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  items           CampaignItem[]
+
+  @@unique([workspaceId, requestId])
+  @@index([workspaceId, createdAt])
+  @@index([status, leaseUntil])
+}
+
+model CampaignItem {
+  id               String    @id @default(uuid())
+  campaignId       String
+  campaign         Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  dayIndex         Int
+  plannedAt        DateTime
+  /// PENDING | PROCESSING | READY | FAILED | SKIPPED
+  status           String    @default("PENDING")
+  generatedContent Json?
+  mediaIds         String[]  @default([])
+  error            String?
+  post             Post?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([campaignId, dayIndex])
 }

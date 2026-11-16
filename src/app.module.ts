@@ -12,6 +12,7 @@ import {AuthModule} from './auth/auth.module';
 import {AutopilotModule} from './autopilot/autopilot.module';
 import {BillingModule} from './billing/billing.module';
 import {BrandModule} from './brand/brand.module';
+import {CampaignModule} from './campaigns/campaign.module';
 import {CryptoModule} from './crypto/crypto.module';
 import {DashboardModule} from './dashboard/dashboard.module';
 import {MailModule} from './mail/mail.module';
@@ -50,6 +51,7 @@ import {WorkspacesModule} from './workspaces/workspaces.module';
     PostsModule,
     AiModule,
     AutopilotModule,
+    CampaignModule,
     AnalyticsModule,
     DashboardModule,
     AdminModule,

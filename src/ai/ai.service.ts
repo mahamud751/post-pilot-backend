@@ -436,6 +436,39 @@ export class AiService {
     };
   }
 
+  /** One daily campaign post with complete, validated copy for every selected platform. */
+  async campaignPost(ctx: WorkspaceContext, userId: string, input: {
+    date: string; dayIndex: number; days: number; platforms: SocialPlatform[];
+    language?: string; goal?: string | null; themes?: string | null; previousTitles: string[];
+  }) {
+    const brand = await this.brand.get(ctx.id);
+    const prompt = [
+      `BRAND FACTS:\n${this.brandBlock(brand)}`,
+      LANGUAGE_RULES[input.language || brand.languages[0] || 'en'],
+      `Create day ${input.dayIndex + 1} of a ${input.days}-day daily campaign, for ${input.date}.`,
+      `Channels: ${input.platforms.join(', ')}. Return exactly one item per channel, all about the same daily idea.`,
+      input.platforms.map(platform => this.platformRules(platform)).join('\n'),
+      `Campaign goal: ${input.goal || 'Build consistent engagement with the brand.'}`,
+      `Themes: ${input.themes || 'Rotate product highlights, useful tips, behind the scenes, brand story and community questions.'}`,
+      `Already used ideas (avoid repeating): ${input.previousTitles.join('; ')}`,
+      'Use the actual products and facts in the brand kit. Do not invent dishes, ingredients, opening hours, events, prices, promotions or customer stories.',
+      'Each item needs a postIdea, contentPillar, caption, hashtags, cta and visualBrief. Keep the entire caption including CTA and hashtags within the channel limit. The visual brief must describe the same idea and must not contain invented factual claims.',
+    ].join('\n\n');
+    const {result, generationId} = await this.run(ctx, userId, 'captions', input, prompt, PLAN_SCHEMA);
+    const raw = (result.json as {items?: unknown[]})?.items;
+    const channels = input.platforms.map(platform => {
+      const row = (Array.isArray(raw) ? raw : []).find(value => String((value as Record<string, unknown>)?.platform).toUpperCase() === platform) as Record<string, unknown> | undefined;
+      const body = str(row?.caption, 5000);
+      if (!body) throw new ServiceUnavailableException(`The AI returned no usable ${PLATFORMS[platform].label} caption. Retry this day.`);
+      const cta = str(row?.cta, 300);
+      const hashtags = strList(row?.hashtags, platform === 'FACEBOOK' ? 5 : 15, 60).map(tag => '#' + tag.replace(/^#+/, ''));
+      const caption = [body, cta && !body.includes(cta) ? cta : '', hashtags.join(' ')].filter(Boolean).join('\n\n');
+      if (caption.length > PLATFORMS[platform].maxTextLength) throw new ServiceUnavailableException('The generated caption exceeds the channel limit. Retry this day.');
+      return {platform, caption, title: str(row?.postIdea, 200), contentPillar: str(row?.contentPillar, 80), visualBrief: str(row?.visualBrief, 700)};
+    });
+    return {generationId, channels};
+  }
+
   /**
    * Drafts the next autopilot batch. Does not publish. The caller decides draft, review or schedule.
    */
