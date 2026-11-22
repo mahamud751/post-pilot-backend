@@ -5,6 +5,7 @@ import {CurrentUserId} from '../common/decorators/current-user.decorator';
 import {CurrentWorkspace} from '../common/decorators/current-workspace.decorator';
 import {WORKSPACE_HEADER, WorkspaceContext, WorkspaceGuard} from '../workspaces/workspace.guard';
 import {DashboardService} from './dashboard.service';
+import {HealthService} from '../publishing/health.service';
 
 @ApiTags('dashboard')
 @ApiBearerAuth()
@@ -12,7 +13,12 @@ import {DashboardService} from './dashboard.service';
 @UseGuards(JwtAuthGuard, WorkspaceGuard)
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboardService: DashboardService) {}
+  constructor(private readonly dashboardService: DashboardService, private readonly health: HealthService) {}
+
+  @Get('health')
+  healthOverview(@CurrentWorkspace() ctx: WorkspaceContext) {
+    return this.health.workspace(ctx.id);
+  }
 
   @Get()
   get(@CurrentWorkspace() ctx: WorkspaceContext, @CurrentUserId() userId: string) {

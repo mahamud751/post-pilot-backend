@@ -75,6 +75,14 @@ export class MediaService {
     };
   }
 
+  async download(workspaceId: string, id: string) {
+    const media = await this.prisma.media.findFirst({where: {id, workspaceId, deletedAt: null}});
+    if (!media) throw new NotFoundException('Media not found');
+    const path = storagePath(media.storageKey || media.filename);
+    if (!existsSync(path)) throw new NotFoundException('Media file not found');
+    return {path, mimeType: media.mimeType};
+  }
+
   async save(workspaceId: string, userId: string, file: Express.Multer.File) {
     const sniffed = await sniffFile(file.path);
     if (!sniffed) {

@@ -92,6 +92,12 @@ export class PostsController {
     return {post: await this.postsService.approve(ctx, userId, id, input)};
   }
 
+  @Post('posts/:id/remind')
+  @RequireRoles(...CONTENT_WRITERS)
+  remind(@CurrentWorkspace() ctx: WorkspaceContext, @CurrentUserId() userId: string, @Param('id') id: string) {
+    return this.postsService.remindReview(ctx, userId, id);
+  }
+
   @Post('posts/:id/reject')
   @RequireRoles(...REVIEWERS)
   async reject(

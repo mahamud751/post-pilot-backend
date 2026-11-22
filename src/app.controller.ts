@@ -1,7 +1,16 @@
-import {Controller, Get} from '@nestjs/common';
+import {Controller, Get, ServiceUnavailableException} from '@nestjs/common';
+import {HealthService} from './publishing/health.service';
 
 @Controller()
 export class AppController {
+  constructor(private readonly healthService: HealthService) {}
+
+  @Get('health/ready')
+  async ready() {
+    const result = await this.healthService.readiness();
+    if (!result.ok) throw new ServiceUnavailableException({ok: false, service: 'postpilot-api'});
+    return {ok: true, service: 'postpilot-api'};
+  }
   @Get('health')
   health() {
     return {ok: true, service: 'schedlio-api'};

@@ -1,4 +1,5 @@
-import {Injectable, Logger} from '@nestjs/common';
+import {BadRequestException, Injectable, Logger} from '@nestjs/common';
+import {localDate} from '../common/timezone';
 import {PostTarget, Prisma} from '@prisma/client';
 import {AuditService} from '../audit/audit.service';
 import {PrismaService} from '../prisma/prisma.service';
@@ -9,7 +10,7 @@ import {ExperimentsService} from '../intelligence/experiments.service';
 import {MemoryService} from '../intelligence/memory.service';
 import type {WorkspaceContext} from '../workspaces/workspace.guard';
 
-const METRICS = ['reach', 'impressions', 'engagements', 'clicks'] as const;
+const METRICS = ['reach', 'impressions', 'engagements', 'clicks', 'saves', 'shares', 'videoViews'] as const;
 type Metric = (typeof METRICS)[number];
 const REFRESH_WINDOW_DAYS = 90;
 
@@ -34,6 +35,9 @@ export class AnalyticsService {
   private range(from?: string, to?: string) {
     const end = to ? new Date(to) : new Date();
     const start = from ? new Date(from) : new Date(end.getTime() - 30 * 86_400_000);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end || end.getTime() - start.getTime() > 366 * 86_400_000) {
+      throw new BadRequestException('Choose a valid date range of up to 366 days.');
+    }
     return {start, end};
   }
 
@@ -71,7 +75,7 @@ export class AnalyticsService {
     const fetched = targets.map(t => t.metricsFetchedAt?.getTime()).filter((v): v is number => Boolean(v));
     const daily = new Map<string, number>();
     for (const t of targets) {
-      const day = t.publishedAt!.toISOString().slice(0, 10);
+      const day = localDate(t.publishedAt!, ctx.timezone);
       daily.set(day, (daily.get(day) || 0) + 1);
     }
 
@@ -97,6 +101,65 @@ export class AnalyticsService {
         metricsFetchedAt: t.metricsFetchedAt,
       })),
     };
+  }
+
+  async businessReport(ctx: WorkspaceContext, from?: string, to?: string) {
+    const {start, end} = this.range(from, to);
+    const previousStart = new Date(start.getTime() - (end.getTime() - start.getTime()));
+    const [targets, previous, sales, stages, workspace] = await Promise.all([
+      this.prisma.postTarget.findMany({where: {post: {workspaceId: ctx.id}, status: 'PUBLISHED', publishedAt: {gte: start, lt: end}},
+        include: {post: {select: {id: true, title: true, caption: true, campaignItem: {select: {campaign: {select: {id: true, name: true}}}}}}}}),
+      this.publishedTargets(ctx.id, previousStart, start),
+      this.prisma.sale.findMany({where: {workspaceId: ctx.id, occurredAt: {gte: start, lt: end}},
+        select: {amount: true, currency: true, quantity: true, postId: true, post: {select: {campaignItem: {select: {campaignId: true}}}}}}),
+      this.prisma.engagementItem.groupBy({by: ['leadStage'], where: {workspaceId: ctx.id, receivedAt: {gte: start, lt: end}}, _count: true}),
+      this.prisma.workspace.findUniqueOrThrow({where: {id: ctx.id}, select: {name: true}}),
+    ]);
+    const revenue = (rows: typeof sales) => Object.entries(rows.reduce<Record<string, {amount: number; orders: number; quantity: number}>>((acc, sale) => {
+      const group = acc[sale.currency] ||= {amount: 0, orders: 0, quantity: 0};
+      group.amount += sale.amount; group.orders++; group.quantity += sale.quantity;
+      return acc;
+    }, {})).map(([currency, value]) => ({currency, ...value}));
+    const campaigns = new Map<string, {id: string; name: string; targets: typeof targets}>();
+    for (const target of targets) {
+      const campaign = target.post.campaignItem?.campaign;
+      if (!campaign) continue;
+      if (!campaigns.has(campaign.id)) campaigns.set(campaign.id, {...campaign, targets: []});
+      campaigns.get(campaign.id)!.targets.push(target);
+    }
+    const top = targets.filter(target => target.engagements != null).sort((a, b) => b.engagements! - a.engagements!).slice(0, 5);
+    return {
+      workspace: workspace.name, timezone: ctx.timezone, range: {from: start, to: end}, generatedAt: new Date(),
+      current: {published: targets.length, metrics: Object.fromEntries(METRICS.map(metric => [metric, sumAvailable(targets, metric)]))},
+      previous: {published: previous.length, from: previousStart, to: start,
+        metrics: Object.fromEntries(METRICS.map(metric => [metric, sumAvailable(previous, metric)]))},
+      revenue: revenue(sales), attributedRevenue: revenue(sales.filter(sale => sale.postId !== null)),
+      leads: Object.fromEntries(stages.map(stage => [stage.leadStage, stage._count])),
+      campaigns: [...campaigns.values()].map(campaign => ({id: campaign.id, name: campaign.name, published: campaign.targets.length,
+        metrics: Object.fromEntries(METRICS.map(metric => [metric, sumAvailable(campaign.targets, metric)])),
+        revenue: revenue(sales.filter(sale => sale.post?.campaignItem?.campaignId === campaign.id))})),
+      topPosts: top.map(target => ({id: target.post.id, title: target.post.title || target.post.caption.slice(0, 100),
+        platform: target.platform, engagements: target.engagements, remoteUrl: target.remoteUrl})),
+      recommendations: [
+        ...(targets.length === 0 ? ['Publish your first post to start collecting performance data.'] : []),
+        ...(targets.length > 0 && top.length === 0 ? ['Refresh your metrics to see which posts received engagement.'] : []),
+        ...(top.length ? [`Review “${top[0].post.title || top[0].post.caption.slice(0, 60)}”, the post with the highest reported engagement in this period, for ideas to test next.`] : []),
+        ...(sales.length === 0 ? ['Record sales or connect your store to measure business results alongside social engagement.'] : []),
+        ...(sales.some(sale => !sale.postId) ? ['Link recorded sales to their source post where known to improve campaign attribution.'] : []),
+      ],
+      note: 'Metrics are lifetime totals for posts published in each period, not engagement that occurred during that period. Older posts had more time to collect results. Recorded sales use the sale date; attribution reflects supplied post links, not proof of causation. Reach is not deduplicated across posts.',
+    };
+  }
+
+  async exportReport(ctx: WorkspaceContext, from?: string, to?: string) {
+    const report = await this.businessReport(ctx, from, to);
+    const singleLine = (text: string) => text.replace(/[\r\n]/g, ' ');
+    return [`# ${singleLine(report.workspace)} — performance report`,
+      `${report.range.from.toISOString()} to ${report.range.to.toISOString()} (${report.timezone})`,
+      `Published destinations: ${report.current.published}; previous period: ${report.previous.published}.`,
+      ...METRICS.map(metric => `${metric}: ${report.current.metrics[metric].value ?? 'unavailable'} (reported by ${report.current.metrics[metric].reported} destinations).`),
+      '', '## Recorded sales', ...report.revenue.map(group => `${group.currency} ${(group.amount / 100).toFixed(2)} across ${group.orders} recorded sales.`),
+      '', '## Next actions', ...report.recommendations.map(line => `- ${singleLine(line)}`), '', report.note].join('\n');
   }
 
   async exportCsv(ctx: WorkspaceContext, from?: string, to?: string) {

@@ -53,8 +53,15 @@ export class CreateCampaignDto {
   @MaxLength(1000)
   themes?: string;
 
-  @IsIn(['TEXT', 'UPLOAD', 'AI_IMAGE', 'AI_VIDEO'])
-  mediaMode: 'TEXT' | 'UPLOAD' | 'AI_IMAGE' | 'AI_VIDEO';
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ArrayUnique()
+  @IsString({each: true})
+  creatorIds?: string[];
+
+  @IsIn(['TEXT', 'UPLOAD', 'AI_IMAGE', 'AI_VIDEO', 'AI_MIXED'])
+  mediaMode: 'TEXT' | 'UPLOAD' | 'AI_IMAGE' | 'AI_VIDEO' | 'AI_MIXED';
 
   @IsOptional()
   @IsArray()

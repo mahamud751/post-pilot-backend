@@ -160,6 +160,45 @@ describe('Daily campaigns', () => {
     expect(ai.prompts).toHaveLength(30);
   }, 60000);
 
+  it('splits a monthly mixed-media brief across five creators and schedules their posts', async () => {
+    const {owner, accounts, mediaId} = await setup('Agency', false);
+    await prisma.subscription.update({where: {workspaceId: owner.workspaceId}, data: {plan: 'AGENCY'}});
+    const creators = await Promise.all(Array.from({length: 5}, async () => {
+      const user = await prisma.user.create({data: {name: 'Creator', email: `${randomUUID()}@e2e.test`}});
+      return prisma.workspaceMember.create({data: {workspaceId: owner.workspaceId, userId: user.id, role: 'EDITOR'}});
+    }));
+    const ids = creators.map(person => person.id);
+    const body = input(accounts.map(a => a.id), undefined, {days: 30, themes: 'Show our lentil bowls', mediaMode: 'AI_MIXED', creatorIds: ids});
+    await api().post('/v1/campaigns').set(as(owner)).send({...body, creatorIds: [randomUUID()]}).expect(400);
+    const video = await prisma.media.create({data: {workspaceId: owner.workspaceId, userId: owner.userId,
+      originalName: 'clip.mp4', filename: 'clip.mp4', mimeType: 'video/mp4', url: '/uploads/clip.mp4',
+      width: 1080, height: 1920, size: 5000, durationSec: 5}});
+    const service = app.get(CreativeService);
+    const capabilities = jest.spyOn(service, 'capabilities').mockResolvedValue({imageConfigured: true, ffmpeg: true});
+    const render = jest.spyOn(service, 'create').mockImplementation(async (_ctx, _user, request) => ({
+      image: {id: mediaId}, video: request.kind === 'video' ? video : null, note: '',
+    } as any));
+    try {
+      const campaign = await create(owner, body);
+      await campaigns.process(campaign.id);
+      const result = (await api().get(`/v1/campaigns/${campaign.id}`).set(as(owner)).expect(200)).body.campaign;
+      expect(result.status).toBe('READY');
+      expect(result.items).toHaveLength(30);
+      result.items.forEach((day: any, i: number) => {
+        expect(day.creator.id).toBe(ids[i % 5]);
+        expect(day.visualBrief).toBe('A welcoming restaurant table');
+        expect(day.post.status).toBe('scheduled');
+        expect(day.post.media[0].id).toBe([2, 5].includes(i % 7) ? video.id : mediaId);
+        expect(ai.prompts[i]).toContain('Show our lentil bowls');
+      });
+      expect(render).toHaveBeenCalledTimes(30);
+      expect(await prisma.notification.count({where: {workspaceId: owner.workspaceId, type: 'campaign_assigned'}})).toBe(5);
+    } finally {
+      capabilities.mockRestore();
+      render.mockRestore();
+    }
+  }, 60000);
+
   it('honors workspace approval and schedules approved posts without generating them again', async () => {
     const {owner, accounts, mediaId} = await setup('Review');
     await prisma.workspace.update({

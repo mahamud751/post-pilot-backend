@@ -7,12 +7,13 @@ import {
   Post,
   RawBodyRequest,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {ApiBearerAuth, ApiHeader, ApiTags} from '@nestjs/swagger';
 import {PlanCode} from '@prisma/client';
-import {IsBoolean, IsIn} from 'class-validator';
-import type {Request} from 'express';
+import {IsBoolean, IsIn, IsOptional, IsString, Matches, MaxLength} from 'class-validator';
+import type {Request, Response} from 'express';
 import {JwtAuthGuard} from '../auth/jwt-auth.guard';
 import {CurrentUserId} from '../common/decorators/current-user.decorator';
 import {CurrentWorkspace} from '../common/decorators/current-workspace.decorator';
@@ -31,6 +32,10 @@ class CheckoutDto {
 
   @IsIn(['monthly', 'annual'])
   cycle: 'monthly' | 'annual';
+
+  @IsOptional() @IsString() @Matches(/^\+?[0-9 ()-]{7,25}$/) phone?: string;
+  @IsOptional() @IsString() @MaxLength(50) address?: string;
+  @IsOptional() @IsString() @MaxLength(50) city?: string;
 }
 
 class CancelDto {
@@ -60,7 +65,23 @@ export class BillingController {
     @CurrentUserId() userId: string,
     @Body() input: CheckoutDto,
   ) {
-    return this.billingService.checkout(ctx, userId, input.plan, input.cycle);
+    return this.billingService.checkout(ctx, userId, input.plan, input.cycle, input);
+  }
+
+  @Post('sslcommerz/ipn')
+  @HttpCode(200)
+  onlineNotification(@Body() body: Record<string, unknown>) {
+    return this.billingService.confirmOnlinePayment(typeof body.val_id === 'string' ? body.val_id : '');
+  }
+
+  @Post('sslcommerz/return')
+  async onlineReturn(@Body() body: Record<string, unknown>, @Res() response: Response) {
+    // Only server-validated payments activate plans. Browser status fields are untrusted.
+    if (typeof body.val_id === 'string' && body.val_id) {
+      await this.billingService.confirmOnlinePayment(body.val_id);
+      return response.redirect(303, this.billingService.paymentReturnUrl('verified'));
+    }
+    return response.redirect(303, this.billingService.paymentReturnUrl('pending'));
   }
 
   @Post('cancel')

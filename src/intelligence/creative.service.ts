@@ -169,7 +169,9 @@ export class CreativeService {
       await new Promise<void>((resolve, reject) => {
         const child = spawn(
           'ffmpeg',
-          ['-y', '-loop', '1', '-i', imagePath, '-c:v', 'libx264', '-t', '5', '-pix_fmt', 'yuv420p', '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2', outPath],
+          ['-y', '-i', imagePath, '-vf',
+            "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,zoompan=z='1+0.0008*on':x='iw/2-iw/zoom/2':y='ih/2-ih/zoom/2':d=125:s=1080x1920:fps=25",
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outPath],
           {stdio: 'ignore'},
         );
         child.on('error', reject);

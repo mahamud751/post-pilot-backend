@@ -33,6 +33,10 @@ export const campaignCreditEstimate = (days: number, mode: string) =>
   days *
   (AI_CREDIT_COST.captions +
     (mode.startsWith('AI_') ? AI_CREDIT_COST.image : 0));
+function dayMedia(mode: string, dayIndex: number) {
+  if (mode === 'AI_MIXED') return [2, 5].includes(dayIndex % 7) ? 'AI_VIDEO' : 'AI_IMAGE';
+  return mode;
+}
 type Generated = Awaited<ReturnType<AiService['campaignPost']>>;
 const postInclude = {
   targets: {include: {socialAccount: true}},
@@ -53,9 +57,14 @@ export class CampaignService {
   ) {}
 
   async options(ctx: WorkspaceContext) {
-    const [snapshot, capabilities] = await Promise.all([
+    const [snapshot, capabilities, members] = await Promise.all([
       this.entitlements.snapshot(ctx.id),
       this.creatives.capabilities(),
+      this.prisma.workspaceMember.findMany({
+        where: {workspaceId: ctx.id, inviteStatus: 'ACTIVE', role: {in: CONTENT_WRITERS}},
+        select: {id: true, user: {select: {name: true}}},
+        orderBy: [{user: {name: 'asc'}}, {id: 'asc'}],
+      }),
     ]);
     let aiConfigured = true;
     try {
@@ -65,6 +74,8 @@ export class CampaignService {
     }
     return {
       aiConfigured,
+      weeklyMediaMix: Array.from({length: 7}, (_, i) => dayMedia('AI_MIXED', i)),
+      creators: members.map(member => ({id: member.id, name: member.user.name})),
       ...capabilities,
       credits: {
         used: snapshot.usage.aiCredits,
@@ -139,6 +150,14 @@ export class CampaignService {
       throw new ForbiddenException(
         'An owner or admin must enable automatic campaign scheduling.',
       );
+    const creators = input.creatorIds || [];
+    const eligible = creators.length ? await this.prisma.workspaceMember.findMany({
+      where: {workspaceId: ctx.id, id: {in: creators}, inviteStatus: 'ACTIVE', role: {in: CONTENT_WRITERS}},
+      select: {id: true, userId: true},
+    }) : [];
+    if (creators.length > input.days) throw new BadRequestException('Choose at most one creator per campaign day.');
+    if (eligible.length !== creators.length)
+        throw new BadRequestException('Choose current creators from this workspace.');
     const selectedMedia =
       input.mediaMode === 'UPLOAD' ? input.mediaIds || [] : [];
     const media = selectedMedia.length
@@ -181,7 +200,7 @@ export class CampaignService {
         );
       if (
         !capabilities.ffmpeg &&
-        (input.mediaMode === 'AI_VIDEO' ||
+        (['AI_VIDEO', 'AI_MIXED'].includes(input.mediaMode) ||
           accounts.some((account) => account.platform === 'INSTAGRAM'))
       )
         throw new BadRequestException(
@@ -225,6 +244,7 @@ export class CampaignService {
         items: {
           create: Array.from({length: input.days}, (_, dayIndex) => ({
             dayIndex,
+            creatorId: creators.length ? creators[dayIndex % creators.length] : null,
             plannedAt: zonedToUtc(
               addDays(input.startDate, dayIndex),
               input.postTime,
@@ -234,6 +254,20 @@ export class CampaignService {
         },
       },
     });
+    // Read the saved assignments because a concurrent request may have created this campaign.
+    const assignments = await this.prisma.campaignItem.groupBy({
+      by: ['creatorId'], where: {campaignId: campaign.id, creatorId: {not: null}}, _count: true,
+    });
+    await Promise.all(assignments.map(async assignment => {
+      const member = eligible.find(person => person.id === assignment.creatorId);
+      if (member) await this.notifications.notify({
+        workspaceId: ctx.id, userId: member.userId, type: 'campaign_assigned',
+        title: 'New campaign assignment',
+        body: `${campaign.name} · ${assignment._count} daily posts assigned to you.`,
+        meta: {campaignId: campaign.id, creatorId: member.id},
+        dedupeKey: `campaign:${campaign.id}:assigned:${member.id}`,
+      });
+    }));
     await this.audit.record({
       workspaceId: ctx.id,
       actorId: userId,
@@ -294,7 +328,7 @@ export class CampaignService {
     const items = await this.prisma.campaignItem.findMany({
       where: {campaignId: id},
       orderBy: {dayIndex: 'asc'},
-      include: {post: {include: postInclude}},
+      include: {post: {include: postInclude}, creator: {select: {id: true, user: {select: {name: true}}}}},
     });
     const serialized = await this.posts.serializeMany(
       items.flatMap((item) => (item.post ? [item.post] : [])),
@@ -306,6 +340,9 @@ export class CampaignService {
         items: items.map((item) => ({
           id: item.id,
           dayIndex: item.dayIndex,
+          creator: item.creator ? {id: item.creator.id, name: item.creator.user.name} : null,
+          mediaMode: dayMedia(campaign.mediaMode, item.dayIndex),
+          visualBrief: (item.generatedContent as unknown as Generated | null)?.channels?.[0]?.visualBrief ?? null,
           plannedAt: item.plannedAt,
           status: item.status,
           error: item.error,
@@ -665,6 +702,7 @@ export class CampaignService {
       throw new BadRequestException(
         'A selected social account needs reconnecting.',
       );
+    const format = dayMedia(campaign.mediaMode, item.dayIndex);
     let generated = item.generatedContent as unknown as Generated | null;
     let post = item.post;
     if (!post) {
@@ -677,6 +715,8 @@ export class CampaignService {
           language: campaign.language || undefined,
           goal: campaign.goal,
           themes: campaign.themes,
+          format,
+          campaignName: campaign.name,
           previousTitles,
         });
         await check();
@@ -739,11 +779,11 @@ export class CampaignService {
               'This post was edited. Attach your chosen image or video in the editor before retrying.',
             );
           const creative = await this.creatives.create(ctx, campaign.authorId, {
-            kind: campaign.mediaMode === 'AI_VIDEO' ? 'video' : 'image',
+            kind: format === 'AI_VIDEO' ? 'video' : 'image',
             prompt: `Brand: ${campaign.name}. ${generated?.channels[0].visualBrief || post.title}. Do not include text, prices or unsupported claims.`,
           });
           await check();
-          if (campaign.mediaMode === 'AI_VIDEO' && !creative.video)
+          if (format === 'AI_VIDEO' && !creative.video)
             throw new BadRequestException(creative.note);
           mediaIds = [creative.video?.id || creative.image.id];
         }

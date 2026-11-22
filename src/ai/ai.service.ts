@@ -439,7 +439,7 @@ export class AiService {
   /** One daily campaign post with complete, validated copy for every selected platform. */
   async campaignPost(ctx: WorkspaceContext, userId: string, input: {
     date: string; dayIndex: number; days: number; platforms: SocialPlatform[];
-    language?: string; goal?: string | null; themes?: string | null; previousTitles: string[];
+    language?: string; goal?: string | null; themes?: string | null; previousTitles: string[]; format: string; campaignName: string;
   }) {
     const brand = await this.brand.get(ctx.id);
     const prompt = [
@@ -448,10 +448,14 @@ export class AiService {
       `Create day ${input.dayIndex + 1} of a ${input.days}-day daily campaign, for ${input.date}.`,
       `Channels: ${input.platforms.join(', ')}. Return exactly one item per channel, all about the same daily idea.`,
       input.platforms.map(platform => this.platformRules(platform)).join('\n'),
+      `Campaign name: ${input.campaignName}`,
+      input.format === 'AI_VIDEO'
+        ? 'Plan a five-second portrait clip made from one still. Describe a single strong opening frame and a hook that works without audio.'
+        : input.format === 'AI_IMAGE' ? 'Compose a portrait image. Specify the subject, framing, setting and light in the visual brief.' : '',
       `Campaign goal: ${input.goal || 'Build consistent engagement with the brand.'}`,
       `Themes: ${input.themes || 'Rotate product highlights, useful tips, behind the scenes, brand story and community questions.'}`,
       `Already used ideas (avoid repeating): ${input.previousTitles.join('; ')}`,
-      'Use the actual products and facts in the brand kit. Do not invent dishes, ingredients, opening hours, events, prices, promotions or customer stories.',
+      'Use actual products and facts from the brand kit and the supplied client brief. Do not invent dishes, ingredients, opening hours, events, prices, promotions or customer stories.',
       'Each item needs a postIdea, contentPillar, caption, hashtags, cta and visualBrief. Keep the entire caption including CTA and hashtags within the channel limit. The visual brief must describe the same idea and must not contain invented factual claims.',
     ].join('\n\n');
     const {result, generationId} = await this.run(ctx, userId, 'captions', input, prompt, PLAN_SCHEMA);

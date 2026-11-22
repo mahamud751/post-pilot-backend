@@ -121,6 +121,17 @@ export class MediaController {
     return this.mediaService.update(ctx.id, userId, id, input);
   }
 
+  @Get(':id/download')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, WorkspaceGuard)
+  async download(@CurrentWorkspace() ctx: WorkspaceContext, @Param('id') id: string, @Res() res: Response) {
+    const file = await this.mediaService.download(ctx.id, id);
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.sendFile(file.path);
+  }
+
   @Delete(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, WorkspaceGuard)

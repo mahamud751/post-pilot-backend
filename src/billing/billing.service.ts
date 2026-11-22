@@ -1,7 +1,8 @@
 import {BadRequestException, Injectable, Logger, UnauthorizedException} from '@nestjs/common';
 import {ConfigService} from '@nestjs/config';
 import {PlanCode, Prisma} from '@prisma/client';
-import {createHmac, timingSafeEqual} from 'crypto';
+import {createHmac, randomUUID, timingSafeEqual} from 'crypto';
+import {BillingCustomer, SslcommerzGateway} from './sslcommerz.gateway';
 import {AuditService} from '../audit/audit.service';
 import {NotificationsService} from '../notifications/notifications.service';
 import {PrismaService} from '../prisma/prisma.service';
@@ -25,13 +26,17 @@ type WebhookEvent = {
   };
 };
 
-function addPeriod(from: Date, cycle: BillingCycle) {
+export function addPeriod(from: Date, cycle: BillingCycle) {
   const next = new Date(from);
+  const day = next.getUTCDate();
+  next.setUTCDate(1);
   if (cycle === 'annual') {
     next.setUTCFullYear(next.getUTCFullYear() + 1);
   } else {
     next.setUTCMonth(next.getUTCMonth() + 1);
   }
+  const lastDay = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+  next.setUTCDate(Math.min(day, lastDay));
   return next;
 }
 
@@ -45,6 +50,7 @@ export class BillingService {
     private readonly entitlements: EntitlementsService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly gateway: SslcommerzGateway,
   ) {}
 
   async overview(workspaceId: string) {
@@ -58,6 +64,7 @@ export class BillingService {
       ...snapshot,
       invoices,
       provider: this.provider(),
+      onlinePaymentsReady: this.provider() === 'sslcommerz' && this.gateway.ready(),
       catalog: PAID_PLANS.map(code => ({
         ...PLANS[code],
         monthlyBdt: priceFor(code, 'monthly'),
@@ -74,13 +81,18 @@ export class BillingService {
    * Starts a plan purchase. With the manual provider this records a pending invoice and returns
    * payment instructions; an admin activates the plan once payment is confirmed.
    */
-  async checkout(ctx: WorkspaceContext, actorId: string, plan: PlanCode, cycle: BillingCycle) {
+  async checkout(ctx: WorkspaceContext, actorId: string, plan: PlanCode, cycle: BillingCycle, customer: BillingCustomer = {}) {
     if (!PAID_PLANS.includes(plan)) {
       throw new BadRequestException('Choose Starter, Growth or Agency');
     }
     const amount = priceFor(plan, cycle);
     const now = new Date();
-    const reference = `PP-${now.getTime().toString(36).toUpperCase()}`;
+    const provider = this.provider();
+    if (!['manual', 'sslcommerz'].includes(provider)) throw new BadRequestException('This payment provider is not supported.');
+    if (provider === 'sslcommerz' && (!this.gateway.ready() || !customer.phone?.trim() || !customer.address?.trim() || !customer.city?.trim())) {
+      throw new BadRequestException('Online checkout needs a configured gateway and your billing phone, address and city.');
+    }
+    const reference = `PP${randomUUID().replace(/-/g, '').slice(0, 26)}`;
     const invoice = await this.prisma.invoice.create({
       data: {
         workspaceId: ctx.id,
@@ -91,8 +103,15 @@ export class BillingService {
         periodEnd: addPeriod(now, cycle),
         provider: this.provider(),
         providerRef: reference,
+        billingCycle: cycle,
       },
     });
+    let redirectUrl: string | undefined;
+    if (provider === 'sslcommerz') {
+      const actor = await this.prisma.user.findUniqueOrThrow({where: {id: actorId}, select: {name: true, email: true}});
+      // Keep the invoice pending after a timeout: a later verified IPN can still settle it.
+      redirectUrl = await this.gateway.initiate({reference, amount: invoice.amount, plan, ...actor, customer});
+    }
     await this.audit.record({
       workspaceId: ctx.id,
       actorId,
@@ -104,10 +123,35 @@ export class BillingService {
     return {
       mode: this.provider(),
       invoice,
+      redirectUrl,
       instructions:
         this.config.get<string>('BILLING_MANUAL_INSTRUCTIONS') ||
         `Pay ৳${amount.toLocaleString('en-US')} and quote reference ${reference}. Your plan activates once the payment is confirmed.`,
     };
+  }
+
+  async confirmOnlinePayment(validationId: string) {
+    if (this.provider() !== 'sslcommerz') throw new BadRequestException('Online payment callbacks are disabled.');
+    const payment = await this.gateway.validate(validationId);
+    if (!['VALID', 'VALIDATED'].includes(payment.status) || payment.risk_level !== '0' || payment.val_id !== validationId) {
+      throw new BadRequestException('Payment was not verified as safe and successful. Contact support if you were charged.');
+    }
+    const invoice = await this.prisma.invoice.findFirst({where: {provider: 'sslcommerz', providerRef: payment.tran_id}});
+    const amount = Number(payment.amount);
+    if (!invoice || !Number.isFinite(amount) || Math.round(amount * 100) !== invoice.amount || payment.currency !== invoice.currency) {
+      throw new BadRequestException('Payment does not match the invoice.');
+    }
+    // Use the invoice identity, not the provider's validation ID, to prevent a second
+    // notification for one purchase from extending a subscription twice.
+    return this.handleEvent('sslcommerz', {id: `invoice:${invoice.id}`, type: 'payment.succeeded', data: {
+      workspaceId: invoice.workspaceId, plan: invoice.plan, cycle: invoice.billingCycle === 'annual' ? 'annual' : 'monthly', amount: invoice.amount, reference: invoice.providerRef!,
+    }});
+  }
+
+  paymentReturnUrl(state: 'verified' | 'pending') {
+    const origin = this.config.get<string>('WEB_APP_URL');
+    if (!origin) throw new BadRequestException('Payment return URL is not configured.');
+    return `${origin.replace(/\/+$/, '')}/billing?payment=${state}`;
   }
 
   async cancelAtPeriodEnd(ctx: WorkspaceContext, actorId: string, cancel: boolean) {

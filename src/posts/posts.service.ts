@@ -472,6 +472,18 @@ export class PostsService {
     return this.get(ctx, id);
   }
 
+  async remindReview(ctx: WorkspaceContext, userId: string, id: string) {
+    const post = await this.load(ctx.id, id);
+    if (post.status !== 'in_review') throw new ConflictException('Only posts waiting for review need a reminder.');
+    await this.notifications.notifyRoles(ctx.id, [...REVIEWERS], {
+      type: 'approval_reminder', title: 'A post still needs your review',
+      body: `Review version ${post.contentVersion} of “${(post.title || post.caption).slice(0, 80)}”.`,
+      meta: {postId: id}, dedupeKey: `review-reminder:${id}:${post.contentVersion}:${new Date().toISOString().slice(0, 10)}`, email: true,
+    });
+    await this.audit.record({workspaceId: ctx.id, actorId: userId, action: 'post.review_reminded', entityType: 'post', entityId: id, metadata: {version: post.contentVersion}});
+    return {ok: true};
+  }
+
   async approve(ctx: WorkspaceContext, userId: string, id: string, input: ApproveDto) {
     const post = await this.load(ctx.id, id);
     if (input.version !== post.contentVersion) {

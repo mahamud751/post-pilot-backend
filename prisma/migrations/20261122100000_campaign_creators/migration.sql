@@ -1,0 +1,1 @@
+ALTER TABLE "CampaignItem" ADD COLUMN "creatorId" TEXT REFERENCES "WorkspaceMember"("id") ON DELETE SET NULL ON UPDATE CASCADE;

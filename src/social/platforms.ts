@@ -37,7 +37,7 @@ export const PLATFORMS: Record<SocialPlatform, PlatformCapabilities> = {
     text: true,
     photo: true,
     video: true,
-    carousel: false,
+    carousel: true,
     reel: false,
     metrics: true,
     requiresMedia: false,
@@ -110,7 +110,7 @@ export function validateForPlatform(
     problems.push(`${label} posts need text or media.`);
   }
   if (caps.requiresMedia && media.length === 0) {
-    problems.push(`${label} requires an image.`);
+    problems.push(`${label} requires an image or video.`);
   }
   if (media.length > 10) {
     problems.push(`${label} accepts at most 10 images in a carousel.`);
@@ -118,9 +118,13 @@ export function validateForPlatform(
   if (media.length > 1 && !caps.carousel) {
     problems.push(`${label} supports one media item per post in this release.`);
   }
+  if (media.length > 1 && media.some(item => item.mimeType.startsWith('video/'))) {
+    problems.push(`${label} supports up to 10 images together, or one video on its own.`);
+  }
   for (const item of media) {
     const isImage = item.mimeType.startsWith('image/');
     const isVideo = item.mimeType.startsWith('video/');
+    if (!isImage && !isVideo) problems.push(`${label} requires image or video files.`);
     if (isImage && !caps.imageMimeTypes.includes(item.mimeType)) {
       problems.push(`${label} does not accept ${item.mimeType} images${caps.imageMimeTypes.length ? ` (use ${caps.imageMimeTypes.join(', ')})` : ''}.`);
     } else if (isVideo && !caps.videoMimeTypes.includes(item.mimeType)) {

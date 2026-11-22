@@ -1,5 +1,6 @@
 import {BadRequestException, Injectable, Logger, NotFoundException} from '@nestjs/common';
-import {AutopilotConfig, EngagementItem, EngagementStatus, SocialAccount, Workspace} from '@prisma/client';
+import {AutopilotConfig, EngagementItem, EngagementStatus, Prisma, SocialAccount, Workspace} from '@prisma/client';
+import {InboxQuery, UpdateLeadDto} from './inbox.dto';
 import {checkCompliance} from '../ai/compliance';
 import {AiService} from '../ai/ai.service';
 import {AuditService} from '../audit/audit.service';
@@ -44,24 +45,62 @@ export class EngagementService {
 
   // ---------- Inbox API ----------
 
-  async list(ctx: WorkspaceContext, status?: string) {
-    const where = {
+  async list(ctx: WorkspaceContext, query: InboxQuery) {
+    const {status, stage, platform, search, assignee, page, take} = query;
+    const where: Prisma.EngagementItemWhereInput = {
       workspaceId: ctx.id,
-      ...(status && status !== 'ALL' ? {status: status as EngagementStatus} : {}),
+      ...(status === 'ATTENTION' ? {status: {in: SENDABLE}} : status && status !== 'ALL' ? {status: status as EngagementStatus} : {}),
+      ...(stage ? {leadStage: stage} : {}),
+      ...(platform ? {platform} : {}),
+      ...(assignee ? {assignedMemberId: assignee === 'unassigned' ? null : assignee} : {}),
+      ...(search ? {OR: [{text: {contains: search, mode: 'insensitive'}}, {authorName: {contains: search, mode: 'insensitive'}}]} : {}),
     };
-    const [items, counts] = await Promise.all([
+    const [items, counts, total, stages, members] = await Promise.all([
       this.prisma.engagementItem.findMany({
         where,
-        orderBy: {receivedAt: 'desc'},
-        take: 100,
+        orderBy: [{receivedAt: 'desc'}, {id: 'desc'}],
+        take,
+        skip: (page - 1) * take,
         include: {socialAccount: {select: {name: true, handle: true}}},
       }),
       this.prisma.engagementItem.groupBy({by: ['status'], where: {workspaceId: ctx.id}, _count: true}),
+      this.prisma.engagementItem.count({where}),
+      this.prisma.engagementItem.groupBy({by: ['leadStage'], where: {workspaceId: ctx.id}, _count: true}),
+      this.prisma.workspaceMember.findMany({where: {workspaceId: ctx.id, inviteStatus: 'ACTIVE', role: {in: CONTENT_WRITERS}}, select: {id: true, user: {select: {name: true}}}}),
     ]);
     return {
       items,
       counts: Object.fromEntries(counts.map(row => [row.status, row._count])),
+      stages: Object.fromEntries(stages.map(row => [row.leadStage, row._count])),
+      members: members.map(member => ({id: member.id, name: member.user.name})),
+      total, page, take,
     };
+  }
+
+  async updateLead(ctx: WorkspaceContext, userId: string, id: string, input: UpdateLeadDto) {
+    return this.prisma.$transaction(async tx => {
+      if (input.assignedMemberId) {
+        const member = await tx.workspaceMember.findFirst({where: {id: input.assignedMemberId, workspaceId: ctx.id, inviteStatus: 'ACTIVE', role: {in: CONTENT_WRITERS}}});
+        if (!member) throw new BadRequestException('Assign an active writer in this workspace.');
+      }
+      const result = await tx.engagementItem.updateMany({where: {id, workspaceId: ctx.id}, data: input});
+      if (!result.count) throw new NotFoundException('Message not found');
+      await this.audit.record({workspaceId: ctx.id, actorId: userId, action: 'engagement.lead_updated', entityType: 'engagement', entityId: id,
+        metadata: {leadStage: input.leadStage, assignedMemberId: input.assignedMemberId}}, tx);
+      return {ok: true};
+    });
+  }
+
+  async thread(ctx: WorkspaceContext, id: string) {
+    const item = await this.prisma.engagementItem.findFirst({where: {id, workspaceId: ctx.id}});
+    if (!item) throw new NotFoundException('Message not found');
+    const items = await this.prisma.engagementItem.findMany({
+      where: {workspaceId: ctx.id, socialAccountId: item.socialAccountId,
+        ...(item.kind === 'DM' && item.authorId ? {kind: 'DM', authorId: item.authorId} : {threadId: item.threadId})},
+      orderBy: [{receivedAt: 'desc'}, {id: 'desc'}], take: 50,
+      select: {id: true, text: true, authorName: true, replyText: true, receivedAt: true, repliedAt: true, status: true},
+    });
+    return {items: items.reverse()};
   }
 
   /** A person sends (or edits and sends) a reply from the inbox. */

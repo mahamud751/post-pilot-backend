@@ -32,6 +32,18 @@ export class AnalyticsController {
     return this.analyticsService.exportCsv(ctx, from, to);
   }
 
+  @Get('report')
+  report(@CurrentWorkspace() ctx: WorkspaceContext, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.analyticsService.businessReport(ctx, from, to);
+  }
+
+  @Get('report.md')
+  @Header('Content-Type', 'text/markdown; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="postpilot-report.md"')
+  exportReport(@CurrentWorkspace() ctx: WorkspaceContext, @Query('from') from?: string, @Query('to') to?: string) {
+    return this.analyticsService.exportReport(ctx, from, to);
+  }
+
   @Post('refresh')
   @RequireRoles(...WORKSPACE_MANAGERS)
   refresh(@CurrentWorkspace() ctx: WorkspaceContext, @CurrentUserId() userId: string) {

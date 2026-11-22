@@ -39,7 +39,22 @@ export class FacebookAdapter implements PlatformAdapter {
     const page = encodeURIComponent(account.platformAccountId);
     const media = content.media[0];
     let remotePostId: string;
-    if (media?.mimeType.startsWith('image/')) {
+    if (content.media.length > 1) {
+      if (content.media.length > 10 || content.media.some(item => !item.mimeType.startsWith('image/'))) {
+        throw new PlatformError('Use up to 10 images together, or one video on its own.', 'permanent', 'invalid_media_mix');
+      }
+      const attached: {media_fbid: string}[] = [];
+      for (const image of content.media) {
+        const photo = await graphRequest<{id: string}>('POST', `/${page}/photos`, token, {
+          url: image.url, published: 'false', temporary: 'true',
+        });
+        attached.push({media_fbid: photo.id});
+      }
+      const post = await graphRequest<{id: string}>('POST', `/${page}/feed`, token, {
+        message: content.text, attached_media: JSON.stringify(attached),
+      });
+      remotePostId = post.id;
+    } else if (media?.mimeType.startsWith('image/')) {
       const res = await graphRequest<{id?: string; post_id?: string}>('POST', `/${page}/photos`, token, {
         url: media.url,
         caption: content.text,

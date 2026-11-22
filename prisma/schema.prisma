@@ -115,6 +115,9 @@ model WorkspaceMember {
   inviteStatus InviteStatus  @default(ACTIVE)
   createdAt    DateTime      @default(now())
 
+  campaignDays CampaignItem[]
+  assignedEngagements EngagementItem[]
+
   @@unique([workspaceId, userId])
   @@index([userId])
 }
@@ -550,12 +553,26 @@ model EngagementItem {
   /// Null when autopilot sent it
   sentById        String?
   repliedAt       DateTime?
+  leadStage       LeadStage        @default(NEW)
+  assignedMemberId String?
+  assignedMember  WorkspaceMember? @relation(fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  internalNote    String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
   @@unique([socialAccountId, externalId])
   @@index([workspaceId, status, receivedAt])
   @@index([workspaceId, repliedAt])
+  @@index([workspaceId, leadStage, receivedAt])
+  @@index([assignedMemberId])
+}
+
+enum LeadStage {
+  NEW
+  INTERESTED
+  ORDERED
+  RESOLVED
+  LOST
 }
 
 /// One row per published target, rebuilt from metrics the connected account is allowed to return.
@@ -743,6 +760,7 @@ model Invoice {
   periodEnd   DateTime
   provider    String
   providerRef String?
+  billingCycle String   @default("monthly")
   issuedAt    DateTime  @default(now())
 
   @@index([workspaceId, issuedAt])
@@ -777,7 +795,7 @@ model Campaign {
   language        String?
   goal            String?
   themes          String?
-  /// TEXT | UPLOAD | AI_IMAGE | AI_VIDEO
+  /// TEXT | UPLOAD | AI_IMAGE | AI_VIDEO | AI_MIXED
   mediaMode       String
   /// Uploaded files rotate in this order, one file per day.
   mediaIds        String[]       @default([])
@@ -800,6 +818,8 @@ model CampaignItem {
   id               String    @id @default(uuid())
   campaignId       String
   campaign         Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  creatorId        String?
+  creator          WorkspaceMember? @relation(fields: [creatorId], references: [id], onDelete: SetNull)
   dayIndex         Int
   plannedAt        DateTime
   /// PENDING | PROCESSING | READY | FAILED | SKIPPED

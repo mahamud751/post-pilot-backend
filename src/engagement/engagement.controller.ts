@@ -1,4 +1,5 @@
-import {Body, Controller, Get, Param, Post, Query, UseGuards} from '@nestjs/common';
+import {Body, Controller, Get, Param, Patch, Post, Query, UseGuards} from '@nestjs/common';
+import {InboxQuery, UpdateLeadDto} from './inbox.dto';
 import {ApiBearerAuth, ApiHeader, ApiTags} from '@nestjs/swagger';
 import {IsOptional, IsString, MaxLength} from 'class-validator';
 import {JwtAuthGuard} from '../auth/jwt-auth.guard';
@@ -24,8 +25,19 @@ export class EngagementController {
   constructor(private readonly engagement: EngagementService) {}
 
   @Get()
-  list(@CurrentWorkspace() ctx: WorkspaceContext, @Query('status') status?: string) {
-    return this.engagement.list(ctx, status);
+  list(@CurrentWorkspace() ctx: WorkspaceContext, @Query() query: InboxQuery) {
+    return this.engagement.list(ctx, query);
+  }
+
+  @Get(':id/thread')
+  thread(@CurrentWorkspace() ctx: WorkspaceContext, @Param('id') id: string) {
+    return this.engagement.thread(ctx, id);
+  }
+
+  @Patch(':id/lead')
+  @RequireRoles(...CONTENT_WRITERS)
+  lead(@CurrentWorkspace() ctx: WorkspaceContext, @CurrentUserId() userId: string, @Param('id') id: string, @Body() input: UpdateLeadDto) {
+    return this.engagement.updateLead(ctx, userId, id, input);
   }
 
   @Post(':id/reply')
